@@ -6,24 +6,38 @@ This project analyzes a synthetic U.S. e-commerce dataset containing approximate
 
 The project focuses on three main business areas:
 
-- Sales
-- Delivery
-- Customer Satisfaction
+- **Sales**
+- **Delivery**
+- **Customer Satisfaction**
 
-The analysis also includes a machine learning component to investigate whether late deliveries can be predicted immediately after payment confirmation using information available at that time.
+The project also includes a machine learning component to investigate whether late deliveries can be predicted immediately after payment confirmation using only the information available at that time.
+
+## Business Questions
+
+### Sales
+- Are there significant differences in merchandise profitability across customer segments?
+- Which customer segment generates the most revenue?
+
+### Delivery
+- How are shipping distance and delivery time related?
+- Can late deliveries be predicted immediately after payment confirmation?
+
+### Customer Satisfaction
+- What is the overall level of customer satisfaction?
+- How does customer satisfaction vary by delivery status and customer segment?
 
 ## Tools
 
-- PostgreSQL — data preparation, validation, staging, analytics, and modeling datasets
-- Python — exploratory data analysis, feature engineering, machine learning, and diagnostic investigation
-- R — statistical analysis, hypothesis testing, effect sizes, and business interpretation
-- Power BI — business visualization and dashboard development
+- **PostgreSQL** — data preparation, validation, staging, analytics, and modeling datasets
+- **Python** — exploratory data analysis, feature engineering, machine learning, and diagnostic investigation
+- **R** — statistical analysis, hypothesis testing, effect sizes, confidence intervals, and business interpretation
+- **Power BI** — business visualization and dashboard development
 
-## Project Workflow
+## Dataset
 
-### 1. SQL Data Preparation
+This project uses the **Synthetic U.S. E-Commerce Dataset (2019–2025)** available on Kaggle.
 
-The original dataset contains multiple related tables, including:
+The dataset contains information on more than 1 million orders and includes eight related tables:
 
 - Customers
 - Orders
@@ -34,17 +48,27 @@ The original dataset contains multiple related tables, including:
 - Sellers
 - Geolocation
 
-The SQL workflow was organized into:
+The raw data is not included in this repository because of its size.
 
-- Raw layer
-- Staging layer
-- Analytics layer
-- Analysis layer
-- Modeling layer
+## Project Workflow
 
-The final modeling dataset was created at one row per order to avoid duplication caused by one-to-many relationships.
+### 1. SQL Data Preparation
 
-## 2. Python Analysis and Machine Learning
+PostgreSQL was used to prepare the data for analytics and modeling.
+
+The SQL workflow was organized into five layers:
+
+1. **Raw**
+2. **Staging**
+3. **Analytics**
+4. **Analysis**
+5. **Modeling**
+
+Because the original dataset contains several one-to-many relationships, such as orders with multiple items or payments, the final modeling dataset was created at **one row per order** to avoid duplicate orders and incorrect aggregations.
+
+Data quality and structural validation checks were also performed before analysis and modeling.
+
+### 2. Python Analysis and Machine Learning
 
 Python was used for:
 
@@ -55,8 +79,9 @@ Python was used for:
 - Chronological train, validation, and test split
 - Model comparison
 - Diagnostic investigation
+- Sensitivity analysis
 
-Models evaluated included:
+The late-delivery models evaluated included:
 
 - Logistic Regression
 - Random Forest
@@ -64,13 +89,13 @@ Models evaluated included:
 - LightGBM
 - CatBoost
 
-Primary late-delivery models performed close to random discrimination, with ROC-AUC values around 0.50.
+The prediction point was defined as **immediately after payment confirmation**, so only information available at that time was included in the primary predictor set.
 
-A sensitivity model using estimated delivery duration achieved much higher performance, but the feature was not included in the primary operational model because its data-generation mechanism and prediction-time availability could not be fully verified.
+The data was split chronologically to reduce the risk of future information leaking into model development.
 
-## 3. R Statistical Analysis
+### 3. R Statistical Analysis
 
-R was used for explanatory and statistical analysis across the three business areas.
+R was used for explanatory and statistical analysis across the three main business areas.
 
 The analysis included:
 
@@ -82,17 +107,21 @@ The analysis included:
 - Confidence intervals
 - Sensitivity and robustness checks
 
+The statistical analysis focused on identifying associations and practical differences rather than using statistical significance alone.
+
 ## Key Findings
 
 ### Sales
 
-The dataset generated approximately:
+From 2019 to 2025, the dataset generated approximately:
 
-- $910.61 million in merchandise revenue
-- $233.89 million in merchandise profit
-- 25.69% revenue-weighted merchandise margin
+- **$910.61 million** in merchandise revenue
+- **$233.89 million** in merchandise profit
+- **25.69%** revenue-weighted merchandise margin
 
-Customer segments showed differences in merchandise profitability, with VIP orders having lower average merchandise margins than Consumer and Corporate orders.
+Customer segments showed differences in merchandise profitability.
+
+VIP orders had lower average merchandise margins than Consumer and Corporate orders.
 
 ### Delivery
 
@@ -102,27 +131,35 @@ However, longer shipping distances were not clearly associated with higher late-
 
 The synthetic dataset also contained unusual fixed delivery-delay patterns:
 
-- On-time orders were delivered approximately 2 days before the estimated date
-- Late orders were delivered approximately 5 days after the estimated date
+- On-time orders were delivered approximately **2 days before** the estimated delivery date
+- Late orders were delivered approximately **5 days after** the estimated delivery date
+
+These patterns suggest that the delivery outcomes may be influenced by the synthetic data-generation process.
 
 ### Customer Satisfaction
 
-Approximately 75% of orders received 4-5 star reviews.
+Approximately **75% of orders received 4–5 star reviews**.
 
 Late deliveries were strongly associated with negative reviews.
 
-VIP customers also showed higher negative review rates than other customer segments, including among on-time orders.
+VIP customers also had higher negative review rates than other customer segments, including among orders that were delivered on time.
 
-## Machine Learning Conclusion
+## Machine Learning Results
 
-The approved predictor set available immediately after payment confirmation did not provide sufficient predictive utility for a reliable late-delivery model.
+The primary late-delivery models using the approved predictor set performed close to random discrimination, with ROC-AUC values around **0.50**.
 
-The best-performing primary model remained close to random classification.
+This suggests that the information available immediately after payment confirmation did not provide enough predictive signal to build a reliable late-delivery model.
+
+A sensitivity model that included estimated delivery duration performed much better.
+
+However, estimated delivery duration was excluded from the primary operational model because its data-generation mechanism and availability at prediction time could not be fully verified.
+
+Because of this uncertainty, no deployment-ready late-delivery model was selected.
 
 This result highlights the importance of evaluating:
 
 - Data leakage
-- Feature availability
+- Prediction-time feature availability
 - Synthetic data-generation rules
 - Predictive signal
 - Model reliability
@@ -131,13 +168,13 @@ rather than selecting a model only because it produces a high numerical score.
 
 ## Power BI Dashboard
 
-The Power BI dashboard summarizes the project through three areas:
+The Power BI dashboard provides a business-facing summary of the project across three areas:
 
-1. Sales
-2. Delivery
-3. Customer Satisfaction
+1. **Sales**
+2. **Delivery**
+3. **Customer Satisfaction**
 
-The dashboard is designed as a simple business-facing summary of the analytical results.
+![U.S. E-Commerce Performance Dashboard](image/dashboard.png)
 
 ## Repository Structure
 
@@ -145,6 +182,8 @@ The dashboard is designed as a simple business-facing summary of the analytical 
 us-ecommerce-performance-analytics/
 │
 ├── image/
+│   └── dashboard.png
+│
 ├── python/
 │   ├── late_delivery_analysis_main.ipynb
 │   └── late_delivery_analysis_main.html
@@ -164,24 +203,26 @@ us-ecommerce-performance-analytics/
 └── .gitignore
 ```
 
-## Dataset
-
-The project uses the Synthetic U.S. E-Commerce Dataset (2019-2025) available on Kaggle.
-
-The raw dataset is not included in this repository because of its size.
-
 ## Limitations
 
 This dataset is fully synthetic and contains several highly structured relationships that may reflect simulation rules rather than real-world e-commerce behavior.
+
+For example:
+
+- On-time orders followed a fixed delivery pattern of approximately 2 days earlier than the estimated date
+- Late orders followed a fixed delivery pattern of approximately 5 days later than the estimated date
+- Late delivery had an unusually strong relationship with negative reviews
+- Estimated delivery duration showed a very strong relationship with the late-delivery target
 
 Therefore:
 
 - Results should not be interpreted as causal evidence
 - Business recommendations should be validated using real-world transactional data
-- High model performance should be reviewed carefully for potential leakage or synthetic artifacts
+- Models with unexpectedly high performance should be investigated carefully for potential leakage or synthetic artifacts
+- Findings from this dataset should not be generalized directly to real-world U.S. e-commerce operations
 
 ## Author
 
-Siripaiboon Janpetch  
+**Siripaiboon Janpetch**  
 M.S. Data Analytics  
 The University of Texas at San Antonio
