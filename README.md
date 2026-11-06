@@ -1,4 +1,11 @@
 # U.S. E-Commerce Performance Analytics
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-SQL-336791)
+![Python](https://img.shields.io/badge/Python-3.x-3776AB)
+![R](https://img.shields.io/badge/R-Statistical%20Analysis-276DC3)
+![Power BI](https://img.shields.io/badge/Power%20BI-Dashboard-F2C811)
+![Machine Learning](https://img.shields.io/badge/Machine%20Learning-Classification-orange)
+![License](https://img.shields.io/badge/License-MIT-green)
+![Status](https://img.shields.io/badge/Status-Completed-brightgreen)
 
 ## Project Overview
 
