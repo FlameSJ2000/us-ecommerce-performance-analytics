@@ -1,0 +1,3593 @@
+---
+title: "U.S. E-Commerce Performance Analytics"
+subtitle: "Statistical Analysis of Profitability, Logistics, and Customer Satisfaction"
+author: "Flame Janpetch (Siripaiboon) / HOC749"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Project Overview
+
+This project uses a synthetic U.S. e-commerce dataset from 2019 to 2025 to study profitability, logistics, and customer satisfaction
+The R analysis focuses on finding patterns, comparing results, and understanding business performance through statistics and visualizations.
+
+
+
+# 1. Setup & Libraries
+
+
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(gt)
+library(tidyr)
+library(scales)
+```
+
+
+
+# 2. Data Import
+
+
+```{r load-profitability-data}
+# Load order-level profitability data from PostgreSQL export
+profitability <- read_csv(
+  "S:/us-ecommerce-performance-analytics/data/processed/profitability_order_analysis.csv",
+  show_col_types = FALSE
+)
+
+# Preview the first five rows
+head(profitability, 5)
+```
+
+
+**Results & Interpretation**
+
+The dataset was successfully imported into R with 17 variables. The data types were correct, including dates, customer information, and financial values. Further data quality checks are performed in Section 3.
+
+
+# 3. Data Integrity & Validation
+
+
+## 3.1 Dataset Dimensions & Unique Order IDs
+
+I check the number of rows and columns and confirm that each order has a unique ID.
+
+The dataset is expected to contain 933,748 delivered orders, with one row per order.
+
+```{r validate-dimensions}
+# Dataset dimensions
+cat("Total Rows:", nrow(profitability), "\n")
+cat("Total Columns:", ncol(profitability), "\n")
+
+# Order ID validation
+cat("Unique Orders:",
+    n_distinct(profitability$order_id, na.rm = TRUE), "\n")
+
+cat("Duplicate Order IDs:",
+    sum(duplicated(profitability$order_id)), "\n")
+
+cat("Missing Order IDs:",
+    sum(is.na(profitability$order_id)), "\n")
+```
+
+
+**Results & Interpretation**
+
+The dataset contains 933,748 orders and 17 variables, matching the PostgreSQL export. All order IDs are unique, with no duplications or missing IDs. This confirms that each row represents one order
+
+## 3.2 Missing Values
+
+```{r missing-values}
+missing_summary <- data.frame(
+  variable = names(profitability),
+  missing_count = colSums(is.na(profitability)),
+  missing_pct = round(colMeans(is.na(profitability)) * 100, 2)
+)
+
+print(missing_summary)
+
+cat("Total Missing Values:",
+    sum(is.na(profitability)), "\n")
+
+cat("Rows with Missing Values:",
+    sum(!complete.cases(profitability)), "\n")
+```
+
+**Results & Interpretation**
+
+No missing values were found across all 17 variables and 933,748 orders. The missing-value rate is 0%, so no imputation or row removal is needed.
+
+
+
+## 3.3 Date Range & Temporal Coverage
+
+```{r temporal-coverage}
+# Check purchase date range
+cat("First Purchase Date:",
+    as.character(min(profitability$purchase_date)), "\n")
+
+cat("Last Purchase Date:",
+    as.character(max(profitability$purchase_date)), "\n")
+
+# Count orders by year
+yearly_orders <- profitability %>%
+  count(purchase_year, name = "total_orders") %>%
+  mutate(
+    order_pct = round(
+      100 * total_orders / sum(total_orders), 2
+    )
+  ) %>%
+  arrange(purchase_year)
+
+print(yearly_orders)
+
+# Check number of distinct months in each year
+monthly_coverage <- profitability %>%
+  group_by(purchase_year) %>%
+  summarise(
+    distinct_months = n_distinct(purchase_month),
+    .groups = "drop"
+  )
+
+print(monthly_coverage)
+```
+
+
+**Results & Interpretation**
+
+The dataset contains 933,748 orders from January 2019 to December 2025, covering all 84 months.
+
+Annual orders dropped from 107,159 in 2019 to around 43,000 in 2020 and 2021, then increased to 257,639 in 2025. About 50.55% of orders came from 2024 and 2025.
+
+Since the dataset is synthetic, these changes should not be linked to real-world events without further evidence.
+
+
+## 3.4 Financial Formula Validation
+
+
+```{r financial-validation} 
+# Financial formula validation with rounding tolerance
+tolerance_amount <- 0.01
+tolerance_pct <- 0.00011
+
+financial_checks <- data.frame(
+  check = c(
+    "Revenue = Gross - Discount",
+    "Profit = Revenue - Cost",
+    "Margin Percentage",
+    "Discount Percentage",
+    "Freight-to-Revenue Percentage"
+  ),
+
+  mismatches = c(
+    sum(abs(
+      profitability$net_merchandise_revenue -
+      (profitability$gross_merchandise_value -
+         profitability$discount_amount)
+    ) > tolerance_amount),
+
+    sum(abs(
+      profitability$merchandise_profit -
+      (profitability$net_merchandise_revenue -
+         profitability$product_cost)
+    ) > tolerance_amount),
+
+    sum(abs(
+      profitability$merchandise_margin_pct -
+      100 * profitability$merchandise_profit /
+        profitability$net_merchandise_revenue
+    ) > tolerance_pct),
+
+    sum(abs(
+      profitability$order_discount_pct -
+      100 * profitability$discount_amount /
+        profitability$gross_merchandise_value
+    ) > tolerance_pct),
+
+    sum(abs(
+      profitability$freight_to_revenue_pct -
+      100 * profitability$freight_charge /
+        profitability$net_merchandise_revenue
+    ) > tolerance_pct)
+  )
+)
+
+print(financial_checks)
+```
+
+
+**Results & Interpretation**
+
+All five financial formula checks passed with no mismatches. Revenue Profit, margin, discount, and freight percentages were calculated correctly.
+
+The analysis focuses on merchandise profit, not overall business profit, since shipping and operating costs are not fully included.
+
+
+```{r}
+cat("Nonpositive Gross Merchandise Value:",
+    sum(profitability$gross_merchandise_value <= 0), "\n")
+
+cat("Nonpositive Net Merchandise Revenue:",
+    sum(profitability$net_merchandise_revenue <= 0), "\n")
+
+cat("Non-finite Calculated Ratios:",
+    sum(!is.finite(
+      100 * profitability$discount_amount /
+        profitability$gross_merchandise_value
+    )) +
+    sum(!is.finite(
+      100 * profitability$freight_charge /
+        profitability$net_merchandise_revenue
+    )), "\n")
+```
+
+**Additional Validation**
+
+No invalid revenue values or non-finite financial ratios were found. All five financial formula checks passed, confirming that the data is consistent and ready for profitability analysis
+
+
+## 3.5 Data Readiness Summary
+
+The dataset passed all data quality checks. It contains 933,748 orders and 17 variables, with no duplicates or missing values.
+
+The data covers all 84 months from 2019 to 2025. All five financial formula checks passed, with no invalid revenue values or financial ratios.
+
+The dataset is ready for profitabililty analysis. Since it is synthetic, the findings should not be treated as real-world dataset.
+
+# 4. Profitability Analysis
+
+## 4.1 Overall Profitability Summary
+
+
+```{r overall-profitability-summary, message=FALSE, warning=FALSE}
+library(gt)
+
+# Calculate overall profitability metrics
+profitability_summary <- profitability %>%
+  summarise(
+    total_orders = n(),
+    total_revenue = sum(net_merchandise_revenue),
+    total_product_cost = sum(product_cost),
+    total_profit = sum(merchandise_profit),
+    total_discount = sum(discount_amount),
+    total_freight_charge = sum(freight_charge),
+    avg_order_revenue = mean(net_merchandise_revenue),
+    avg_order_profit = mean(merchandise_profit),
+    avg_order_margin_pct = mean(merchandise_margin_pct),
+    revenue_weighted_margin_pct =
+      100 * sum(merchandise_profit) /
+      sum(net_merchandise_revenue)
+  )
+
+# Create a reader-friendly reporting table
+summary_table <- tibble::tibble(
+  Metric = c(
+    "Total Realized Orders",
+    "Total Net Merchandise Revenue",
+    "Total Product Cost",
+    "Total Merchandise Profit",
+    "Total Discount Amount",
+    "Total Freight Charges",
+    "Average Order Revenue",
+    "Average Order Profit",
+    "Average Order Margin",
+    "Revenue-Weighted Margin"
+  ),
+  Value = c(
+    format(profitability_summary$total_orders,
+           big.mark = ",", scientific = FALSE, trim = TRUE),
+    sprintf("$%.2fM", profitability_summary$total_revenue / 1e6),
+    sprintf("$%.2fM", profitability_summary$total_product_cost / 1e6),
+    sprintf("$%.2fM", profitability_summary$total_profit / 1e6),
+    sprintf("$%.2fM", profitability_summary$total_discount / 1e6),
+    sprintf("$%.2fM", profitability_summary$total_freight_charge / 1e6),
+    sprintf("$%.2f", profitability_summary$avg_order_revenue),
+    sprintf("$%.2f", profitability_summary$avg_order_profit),
+    sprintf("%.2f%%", profitability_summary$avg_order_margin_pct),
+    sprintf("%.2f%%", profitability_summary$revenue_weighted_margin_pct)
+  ),
+  Unit = c(
+    "Orders",
+    rep("USD", 5),
+    rep("USD / Order", 2),
+    rep("Percent", 2)
+  )
+)
+
+# Display formatted summary table
+summary_table %>%
+  gt() %>%
+  tab_header(
+    title = "Overall Merchandise Profitability",
+    subtitle = "Realized E-Commerce Orders | 2019–2025"
+  ) %>%
+  cols_label(
+    Metric = "Financial Metric",
+    Value = "Value",
+    Unit = "Unit"
+  ) %>%
+  cols_align(
+    align = "right",
+    columns = Value
+  ) %>%
+  cols_width(
+    Metric ~ px(330),
+    Value ~ px(140),
+    Unit ~ px(120)
+  ) %>%
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_body(
+      rows = Metric == "Revenue-Weighted Margin"
+    )
+  ) %>%
+  tab_options(
+    table.font.size = px(13),
+    data_row.padding = px(7),
+    table.width = px(590)
+  )
+```
+
+
+
+**Results & Interpretation**
+
+The 933,748 orders generated $910.61 million in net merchandise revenue and $233.89 million in merchandise profit
+
+Average revenue was $975.22 per order, with an average profit of $250.49. The average order margin was 36.24%, while the revenue-weighted margin was 25.69%
+
+Customer freight charges totaled $223.01 million, but actual shipping and operating costs were not included in merchandise profit
+
+The difference between the two margin measures will be explored further.
+
+
+## 4.2 Revenue and Profit Distributions
+
+
+### 4.2.1 Descriptive Statistics
+
+
+```{r revenue-profit-descriptive, message=FALSE, warning=FALSE}
+# Calculate descriptive statistics for revenue and profit
+distribution_summary <- profitability %>%
+  summarise(
+    revenue_mean = mean(net_merchandise_revenue),
+    revenue_median = median(net_merchandise_revenue),
+    revenue_sd = sd(net_merchandise_revenue),
+    revenue_q1 = quantile(net_merchandise_revenue, 0.25),
+    revenue_q3 = quantile(net_merchandise_revenue, 0.75),
+    revenue_p95 = quantile(net_merchandise_revenue, 0.95),
+    revenue_p99 = quantile(net_merchandise_revenue, 0.99),
+    revenue_max = max(net_merchandise_revenue),
+
+    profit_mean = mean(merchandise_profit),
+    profit_median = median(merchandise_profit),
+    profit_sd = sd(merchandise_profit),
+    profit_q1 = quantile(merchandise_profit, 0.25),
+    profit_q3 = quantile(merchandise_profit, 0.75),
+    profit_p95 = quantile(merchandise_profit, 0.95),
+    profit_p99 = quantile(merchandise_profit, 0.99),
+    profit_max = max(merchandise_profit)
+  )
+
+# Organize results into a vertical table
+distribution_table <- tibble::tibble(
+  Statistic = c(
+    "Mean",
+    "Median",
+    "Standard Deviation",
+    "25th Percentile (Q1)",
+    "75th Percentile (Q3)",
+    "95th Percentile (P95)",
+    "99th Percentile (P99)",
+    "Maximum"
+  ),
+
+  Revenue = c(
+    distribution_summary$revenue_mean,
+    distribution_summary$revenue_median,
+    distribution_summary$revenue_sd,
+    distribution_summary$revenue_q1,
+    distribution_summary$revenue_q3,
+    distribution_summary$revenue_p95,
+    distribution_summary$revenue_p99,
+    distribution_summary$revenue_max
+  ),
+
+  Profit = c(
+    distribution_summary$profit_mean,
+    distribution_summary$profit_median,
+    distribution_summary$profit_sd,
+    distribution_summary$profit_q1,
+    distribution_summary$profit_q3,
+    distribution_summary$profit_p95,
+    distribution_summary$profit_p99,
+    distribution_summary$profit_max
+  )
+)
+
+# Display professional formatted table
+distribution_table %>%
+  gt() %>%
+  tab_header(
+    title = "Revenue and Profit Distribution",
+    subtitle = "Order-Level Descriptive Statistics | 2019–2025"
+  ) %>%
+  cols_label(
+    Statistic = "Statistic",
+    Revenue = "Net Merchandise Revenue",
+    Profit = "Merchandise Profit"
+  ) %>%
+  fmt_currency(
+    columns = c(Revenue, Profit),
+    currency = "USD",
+    decimals = 2
+  ) %>%
+  cols_align(
+    align = "right",
+    columns = c(Revenue, Profit)
+  ) %>%
+  cols_width(
+    Statistic ~ px(210),
+    Revenue ~ px(190),
+    Profit ~ px(190)
+  ) %>%
+  tab_options(
+    table.font.size = px(13),
+    data_row.padding = px(7),
+    table.width = px(590)
+  ) %>%
+  tab_source_note(
+    source_note = "Unit: USD per order. Data: 933,748 realized orders."
+  )
+```
+
+
+**Results & Interpretation**
+
+Both revenue and merchandise profit show right-skewed distributions.
+
+Average revenue was $975.22, compared with a median of $642.72. The maximum revenue reached $10,323.75
+
+Average profit was $250.49, compared with a median of $203.90. The maximum revenue reached $2,011.17
+
+The results suggest that a small number of high-value orders increase the average. Medians and percentiles help show the typical order values more clearly.
+
+
+
+
+### 4.2.2 Revenue and Profit Histograms
+
+```{r revenue-histogram, fig.width=9, fig.height=5}
+ggplot(profitability, aes(x = net_merchandise_revenue)) +
+  geom_histogram(
+    bins = 80,
+    fill = "#4472C4",
+    color = "white"
+  ) +
+  geom_vline(
+    xintercept = mean(profitability$net_merchandise_revenue),
+    color = "#D55E00",
+    linetype = "dashed",
+    linewidth = 1
+  ) +
+  geom_vline(
+    xintercept = median(profitability$net_merchandise_revenue),
+    color = "#009E73",
+    linetype = "dotted",
+    linewidth = 1
+  ) +
+  scale_x_continuous(
+    labels = scales::label_dollar()
+  ) +
+  labs(
+    title = "Distribution of Net Merchandise Revenue",
+    subtitle = "933,748 Realized Orders | 2019–2025",
+    x = "Net Merchandise Revenue (USD per Order)",
+    y = "Number of Orders",
+    caption = "Dashed line: Mean | Dotted line: Median"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+
+
+```{r profit-histogram, fig.width=9, fig.height=5}
+ggplot(profitability, aes(x = merchandise_profit)) +
+  geom_histogram(
+    bins = 80,
+    fill = "#4472C4",
+    color = "white"
+  ) +
+  geom_vline(
+    xintercept = mean(profitability$merchandise_profit),
+    color = "#D55E00",
+    linetype = "dashed",
+    linewidth = 1
+  ) +
+  geom_vline(
+    xintercept = median(profitability$merchandise_profit),
+    color = "#009E73",
+    linetype = "dotted",
+    linewidth = 1
+  ) +
+  scale_x_continuous(
+    labels = scales::label_dollar()
+  ) +
+  labs(
+    title = "Distribution of Merchandise Profit",
+    subtitle = "933,748 Realized Orders | 2019–2025",
+    x = "Merchandise Profit (USD per Order)",
+    y = "Number of Orders",
+    caption = "Dashed line: Mean | Dotted line: Median"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+
+**Results & Interpretation**
+
+Both histograms show right-skewed distributions, with most orders having lower revenue and profit values.
+
+Average revenue was $975.22, higher than median of $642.72. Average profit was $250.49, compared with a medain of $203.90.
+
+A small number of high-value orders create long right tails and increase the averages. This shows why medians and percentiles are useful when analyzing typical order performance.
+
+
+
+
+### 4.2.3 Revenue and Profit Boxplots
+
+
+```{r revenue-boxplot, fig.width=9, fig.height=3.5}
+ggplot(profitability, aes(x = net_merchandise_revenue)) +
+  geom_boxplot(
+    fill = "#4472C4",
+    alpha = 0.7,
+    outlier.alpha = 0.15,
+    outlier.size = 0.5
+  ) +
+  scale_x_continuous(
+    labels = scales::label_dollar()
+  ) +
+  labs(
+    title = "Boxplot of Net Merchandise Revenue",
+    subtitle = "933,748 Realized Orders | 2019–2025",
+    x = "Net Merchandise Revenue (USD per Order)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank())
+```
+
+
+```{r profit-boxplot, fig.width=9, fig.height=3.5}
+ggplot(profitability, aes(x = merchandise_profit)) +
+  geom_boxplot(
+    fill = "#4472C4",
+    alpha = 0.7,
+    outlier.alpha = 0.15,
+    outlier.size = 0.5
+  ) +
+  scale_x_continuous(
+    labels = scales::label_dollar()
+  ) +
+  labs(
+    title = "Boxplot of Merchandise Profit",
+    subtitle = "933,748 Realized Orders | 2019–2025",
+    x = "Merchandise Profit (USD per Order)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank())
+```
+
+**Results & Interpretation**
+
+Both boxplots show right-skewed distributions, with several high-value observations.
+
+The middle 50% of orders had revenue between $203.22 and $1,536.51, while profit ranged from $89.57 to $363.21.
+
+Potential outliers were found above $3,536.45 for revenue and $773.67 for profit. These values are not necessarily errors, so they will be kept for further analysis.
+
+Overall, the results show that medians and percentiles are usefull for understanding typical order performance.
+
+
+
+```{r outlier-summary}
+# Calculate IQR-based upper fences
+revenue_upper <- quantile(
+  profitability$net_merchandise_revenue, 0.75
+) + 1.5 * IQR(profitability$net_merchandise_revenue)
+
+profit_upper <- quantile(
+  profitability$merchandise_profit, 0.75
+) + 1.5 * IQR(profitability$merchandise_profit)
+
+# Count observations above each upper fence
+revenue_outliers <- sum(
+  profitability$net_merchandise_revenue > revenue_upper
+)
+
+profit_outliers <- sum(
+  profitability$merchandise_profit > profit_upper
+)
+
+# Display counts and percentages
+outlier_summary <- tibble::tibble(
+  Metric = c("Net Merchandise Revenue", "Merchandise Profit"),
+  Upper_Fence = c(revenue_upper, profit_upper),
+  Outlier_Orders = c(revenue_outliers, profit_outliers),
+  Outlier_Pct = 100 * c(revenue_outliers, profit_outliers) /
+    nrow(profitability)
+)
+
+outlier_summary %>%
+  gt() %>%
+  tab_header(
+    title = "Potential Upper Outliers",
+    subtitle = "1.5 × IQR Rule | 2019–2025"
+  ) %>%
+  fmt_currency(
+    columns = Upper_Fence,
+    currency = "USD",
+    decimals = 2
+  ) %>%
+  fmt_number(
+    columns = Outlier_Orders,
+    decimals = 0
+  ) %>%
+  fmt_percent(
+    columns = Outlier_Pct,
+    scale_values = FALSE,
+    decimals = 2
+  ) %>%
+  cols_label(
+    Metric = "Financial Metric",
+    Upper_Fence = "Upper Fence",
+    Outlier_Orders = "Orders Above Fence",
+    Outlier_Pct = "Share of Orders"
+  ) %>%
+  tab_options(
+    table.font.size = px(13),
+    data_row.padding = px(7)
+  )
+```
+
+**Results & Interpretation**
+
+The analysis found 18,589 revenue outliers (1.99%) and 19,425 profit outliers (2.08%).
+
+Only a small percentage of orders were identified as potential outliers. These values are not necessarily errors and will be kept for further analysis.
+
+
+## 4.3 Merchandise Margin Analysis
+
+### 4.3.1 Margin Descriptive Statistics
+
+
+```{r margin-descriptive-statistics}
+margin_summary <- profitability %>%
+  summarise(
+    Mean = mean(merchandise_margin_pct),
+    Median = median(merchandise_margin_pct),
+    SD = sd(merchandise_margin_pct),
+    Q1 = quantile(merchandise_margin_pct, 0.25),
+    Q3 = quantile(merchandise_margin_pct, 0.75),
+    P95 = quantile(merchandise_margin_pct, 0.95),
+    P99 = quantile(merchandise_margin_pct, 0.99),
+    Minimum = min(merchandise_margin_pct),
+    Maximum = max(merchandise_margin_pct)
+  )
+
+margin_summary %>%
+  tidyr::pivot_longer(
+    cols = everything(),
+    names_to = "Statistic",
+    values_to = "Margin"
+  ) %>%
+  gt() %>%
+  tab_header(
+    title = "Merchandise Margin Summary",
+    subtitle = "933,748 Realized Orders | 2019–2025"
+  ) %>%
+  fmt_number(
+    columns = Margin,
+    decimals = 2,
+    pattern = "{x}%"
+  ) %>%
+  cols_label(
+    Statistic = "Statistic",
+    Margin = "Margin (%)"
+  ) %>%
+  tab_options(
+    table.font.size = px(13),
+    data_row.padding = px(7)
+  )
+```
+
+**Results & Interpretation**
+
+
+The average merchandise margin was 36.24%, while the median was 31.64%.
+
+The middle 50% of orders had margins between 21.43% and 51.58%. Margins ranged from 10.07% to 74.97%
+
+These results show that merchandise margins vary across orders, with the mean higher than the median.
+
+### 4.3.2 Merchandise Margin Distribution
+
+
+```{r margin-histogram, fig.width=9, fig.height=5}
+ggplot(profitability, aes(x = merchandise_margin_pct)) +
+  geom_histogram(
+    bins = 60,
+    fill = "#4472C4",
+    color = "white"
+  ) +
+  geom_vline(
+    xintercept = mean(profitability$merchandise_margin_pct),
+    color = "#D55E00",
+    linetype = "dashed",
+    linewidth = 1
+  ) +
+  geom_vline(
+    xintercept = median(profitability$merchandise_margin_pct),
+    color = "#009E73",
+    linetype = "dotted",
+    linewidth = 1
+  ) +
+  scale_x_continuous(
+    labels = function(x) paste0(x, "%")
+  ) +
+  labs(
+    title = "Distribution of Merchandise Margin",
+    subtitle = "933,748 Realized Orders | 2019–2025",
+    x = "Merchandise Margin (%)",
+    y = "Number of Orders",
+    caption = "Dashed line: Mean | Dotted line: Median"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+
+**Results & Interpretation**
+
+The histogram shows a bimodal distribution, with two main peaks around 20-25% and 50-60%.
+
+The average margin was 36.24%, while the median was 31.64%. This suggests that orders have different margin patterns.
+
+Further analysis will examine how merchandise margins change across order values.
+
+### 4.3.3 Merchandise Margin by Revenue Groups
+
+
+
+```{r margin-by-revenue-quintile}
+margin_by_revenue <- profitability %>%
+  mutate(
+    revenue_group = ntile(net_merchandise_revenue, 5)
+  ) %>%
+  group_by(revenue_group) %>%
+  summarise(
+    Orders = n(),
+    Avg_Revenue = mean(net_merchandise_revenue),
+    Avg_Margin = mean(merchandise_margin_pct),
+    Weighted_Margin = 100 * sum(merchandise_profit) /
+      sum(net_merchandise_revenue),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    Revenue_Group = paste0("Q", revenue_group)
+  )
+
+margin_by_revenue %>%
+  select(Revenue_Group, Orders, Avg_Revenue,
+         Avg_Margin, Weighted_Margin) %>%
+  gt() %>%
+  tab_header(
+    title = "Merchandise Margin by Revenue Group",
+    subtitle = "Five Equal-Sized Order Groups | 2019–2025"
+  ) %>%
+  fmt_number(
+    columns = Orders,
+    decimals = 0
+  ) %>%
+  fmt_currency(
+    columns = Avg_Revenue,
+    currency = "USD"
+  ) %>%
+  fmt_number(
+    columns = c(Avg_Margin, Weighted_Margin),
+    decimals = 2,
+    pattern = "{x}%"
+  ) %>%
+  cols_label(
+    Revenue_Group = "Revenue Group",
+    Orders = "Orders",
+    Avg_Revenue = "Avg. Revenue / Order",
+    Avg_Margin = "Avg. Order Margin",
+    Weighted_Margin = "Revenue-Weighted Margin"
+  ) %>%
+  tab_options(
+    table.font.size = px(13),
+    data_row.padding = px(7)
+  )
+```
+
+
+**Results & Interpretation**
+
+Average merchandise margin decreased as order revenue increased. Q1 had the highest average margin at 50.83%, while Q5 had the lowest at 21.28%
+
+This helps explain why the revenue-weighted margin (25.69%) is lower than the average order margin (36.24%). Higher-revenue orders tend to have lower margins in this dataset.
+
+### 4.3.4 Revenue-Margin Relationship
+
+
+
+```{r revenue-margin-correlation}
+correlation_summary <- tibble::tibble(
+  Method = c("Pearson", "Spearman"),
+  Correlation = c(
+    cor(profitability$net_merchandise_revenue,
+        profitability$merchandise_margin_pct,
+        method = "pearson"),
+    cor(profitability$net_merchandise_revenue,
+        profitability$merchandise_margin_pct,
+        method = "spearman")
+  )
+)
+
+correlation_summary %>%
+  gt() %>%
+  tab_header(
+    title = "Revenue and Merchandise Margin Correlation",
+    subtitle = "933,748 Realized Orders | 2019–2025"
+  ) %>%
+  fmt_number(columns = Correlation, decimals = 4)
+```
+
+
+
+**Results & Interpretation**
+
+Both Pearson (-0.6328) and Spearman (-0.6913) show strong negative correlations between revenue and merchandise margins.
+
+This means higher-revenue orders tend to have lower margins. However, this does not prove that higher revenue causes lower margins , since revenue is also part of the margin calcuations.
+
+
+## 4.4 Discount and Freight Analysis
+
+### 4.4.1 Descriptive Statistics
+
+
+
+```{r discount-freight-summary}
+discount_freight_summary <- profitability %>%
+  summarise(
+    across(
+      c(order_discount_pct,
+        freight_charge,
+        freight_to_revenue_pct),
+      list(
+        Mean = mean,
+        Median = median,
+        SD = sd,
+        Q1 = ~quantile(.x, 0.25),
+        Q3 = ~quantile(.x, 0.75),
+        P95 = ~quantile(.x, 0.95),
+        P99 = ~quantile(.x, 0.99),
+        Min = min,
+        Max = max
+      )
+    )
+  ) %>%
+  tidyr::pivot_longer(
+    cols = everything(),
+    names_to = c("Metric", "Statistic"),
+    names_pattern = "(.*)_(Mean|Median|SD|Q1|Q3|P95|P99|Min|Max)",
+    values_to = "Value"
+  ) %>%
+  mutate(
+    Metric = recode(
+      Metric,
+      order_discount_pct = "Order Discount",
+      freight_charge = "Customer Freight Charge",
+      freight_to_revenue_pct = "Freight / Revenue"
+    ),
+    Unit = if_else(
+      Metric == "Customer Freight Charge",
+      "USD",
+      "%"
+    )
+  ) %>%
+  select(Metric, Statistic, Value, Unit)
+
+discount_freight_summary %>%
+  gt(groupname_col = "Metric") %>%
+  tab_header(
+    title = "Discount and Freight Summary",
+    subtitle = "933,748 Realized Orders | 2019–2025"
+  ) %>%
+  fmt(
+    columns = Value,
+    fns = function(x) sprintf("%.2f", x)
+  ) %>%
+  cols_label(
+    Statistic = "Statistic",
+    Value = "Value",
+    Unit = "Unit"
+  ) %>%
+  tab_options(
+    table.font.size = px(13),
+    data_row.padding = px(6)
+  )
+```
+
+
+**Results & Interpretation**
+
+Most orders had no discounts, with a median discount of 0% and anaverage of 1.52%.
+
+The average customer freight charge was $238.84, compared with a median of $209.45.
+
+The average freight-to-revenue ratio was 84.12%, much higher than the median of 31.84%. This suggests that some orders have very high frieght charges compared with their revenue.
+
+### 4.4.2 Discount and Freight Distributions
+
+
+
+```{r discount-histogram, fig.width=9, fig.height=4}
+ggplot(profitability, aes(x = order_discount_pct)) +
+  geom_histogram(
+    binwidth = 1,
+    boundary = 0,
+    fill = "#4472C4",
+    color = "white"
+  ) +
+  scale_x_continuous(
+    labels = function(x) paste0(x, "%")
+  ) +
+  
+scale_y_continuous(
+  labels = scales::label_comma()
+  ) +
+
+  labs(
+    title = "Distribution of Order Discounts",
+    subtitle = "933,748 Realized Orders | 2019–2025",
+    x = "Order Discount (%)",
+    y = "Number of Orders"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+
+
+```{r freight-histogram, fig.width=9, fig.height=4}
+ggplot(profitability, aes(x = freight_charge)) +
+  geom_histogram(
+    bins = 60,
+    fill = "#4472C4",
+    color = "white"
+  ) +
+  scale_x_continuous(
+    labels = scales::label_dollar()
+  ) +
+  
+  scale_y_continuous(
+  labels = scales::label_comma()
+  ) +
+
+  labs(
+    title = "Distribution of Customer Freight Charges",
+    subtitle = "933,748 Realized Orders | 2019–2025",
+    x = "Customer Freight Charge (USD per Order)",
+    y = "Number of Orders"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+
+
+```{r freight-revenue-histogram, fig.width=9, fig.height=4}
+ggplot(profitability, aes(x = freight_to_revenue_pct)) +
+  geom_histogram(
+    bins = 100,
+    fill = "#4472C4",
+    color = "white"
+  ) +
+  coord_cartesian(xlim = c(0, 350)) +
+  scale_x_continuous(
+    labels = function(x) paste0(x, "%")
+  ) +
+  
+scale_y_continuous(
+  labels = scales::label_comma()
+  ) +
+
+  labs(
+    title = "Distribution of Freight-to-Revenue Ratio",
+    subtitle = "933,748 Realized Orders | 2019–2025",
+    x = "Freight / Net Merchandise Revenue (%)",
+    y = "Number of Orders",
+    caption = "Display limited to 0–350%; observations outside this range remain in the data."
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+**Results & Interpretation**
+
+Most orders had no discounts, while a smaller number receieved discounts of up to 30%.
+
+Customer freight charges show a right-skewed distribution, with most orders having lower to moderate charges.
+
+The freight-to-revenue ratio is also strongly right-skewed. Some orders have frieght charges that are higher than their merchandise revenue.
+
+### 4.4.3 Discount and Merchandise Margin
+
+
+```{r discount-margin-comparison}
+discount_margin_summary <- profitability %>%
+  mutate(
+    Discount_Group = if_else(
+      order_discount_pct > 0,
+      "With Discount",
+      "No Discount"
+    )
+  ) %>%
+  group_by(Discount_Group) %>%
+  summarise(
+    Orders = n(),
+    Avg_Discount = mean(order_discount_pct),
+    Avg_Revenue = mean(net_merchandise_revenue),
+    Avg_Margin = mean(merchandise_margin_pct),
+    Weighted_Margin = 100 * sum(merchandise_profit) /
+      sum(net_merchandise_revenue),
+    .groups = "drop"
+  )
+
+discount_margin_summary %>%
+  gt() %>%
+  tab_header(
+    title = "Merchandise Margin by Discount Status",
+    subtitle = "933,748 Realized Orders | 2019–2025"
+  ) %>%
+  fmt_number(columns = Orders, decimals = 0) %>%
+  fmt_currency(columns = Avg_Revenue, currency = "USD") %>%
+  fmt_number(
+    columns = c(Avg_Discount, Avg_Margin, Weighted_Margin),
+    decimals = 2,
+    pattern = "{x}%"
+  ) %>%
+  cols_label(
+    Discount_Group = "Discount Status",
+    Orders = "Orders",
+    Avg_Discount = "Avg. Discount",
+    Avg_Revenue = "Avg. Revenue",
+    Avg_Margin = "Avg. Order Margin",
+    Weighted_Margin = "Weighted Margin"
+  ) %>%
+  tab_options(
+    table.font.size = px(13),
+    data_row.padding = px(7)
+  )
+```
+
+
+**Results & Interpretation**
+
+
+Orders with discounts had a higher average margin (43.44%) than orders without discounts (34.72%). 
+
+Discounted orders also had lower average revenue ($807.31 vs $1,010.72).
+
+This shows a difference between the two groups, but it does not mean that discounts cause higher margins.
+
+
+### 4.4.4 Freight and Merchandise Margin
+
+
+```{r freight-margin-correlation}
+freight_margin_cor <- tibble::tibble(
+  Variable = c("Freight Charge", "Freight / Revenue"),
+  Pearson = c(
+    cor(profitability$freight_charge,
+        profitability$merchandise_margin_pct,
+        method = "pearson"),
+    cor(profitability$freight_to_revenue_pct,
+        profitability$merchandise_margin_pct,
+        method = "pearson")
+  ),
+  Spearman = c(
+    cor(profitability$freight_charge,
+        profitability$merchandise_margin_pct,
+        method = "spearman"),
+    cor(profitability$freight_to_revenue_pct,
+        profitability$merchandise_margin_pct,
+        method = "spearman")
+  )
+)
+
+freight_margin_cor %>%
+  gt() %>%
+  tab_header(
+    title = "Freight and Merchandise Margin Correlation",
+    subtitle = "933,748 Realized Orders | 2019–2025"
+  ) %>%
+  fmt_number(
+    columns = c(Pearson, Spearman),
+    decimals = 4
+  )
+```
+
+**Results & Interpretation**
+
+Freight charges had a weak negative correlation with merchandise margin (Pearson = -0.1314).
+
+However, the freight-to-revenue ratio showed a positive correlation with margin (Pearson = 0.3506, Spearman = 0.6248).
+
+These results show different patterns, but the freight-to-revenue relationship may be affected by shared revenue calculations.
+
+
+## 4.5 Profitability by Customer Segment and State
+
+### 4.5.1 Customer Segment Profitability
+
+
+
+```{r customer-segment-profitability}
+segment_profitability <- profitability %>%
+  group_by(customer_segment) %>%
+  summarise(
+    Orders = n(),
+    Total_Revenue = sum(net_merchandise_revenue),
+    Total_Profit = sum(merchandise_profit),
+    Avg_Revenue = mean(net_merchandise_revenue),
+    Avg_Profit = mean(merchandise_profit),
+    Avg_Margin = mean(merchandise_margin_pct),
+    Weighted_Margin = 100 * Total_Profit / Total_Revenue,
+    .groups = "drop"
+  ) %>%
+  arrange(desc(Total_Revenue))
+
+segment_profitability %>%
+  gt() %>%
+  tab_header(
+    title = "Profitability by Customer Segment",
+    subtitle = "933,748 Realized Orders | 2019–2025"
+  ) %>%
+  fmt_number(
+    columns = Orders,
+    decimals = 0
+  ) %>%
+  fmt_currency(
+    columns = c(Total_Revenue, Total_Profit),
+    currency = "USD",
+    scale_by = 1 / 1e6,
+    decimals = 2,
+    pattern = "{x}M"
+  ) %>%
+  fmt_currency(
+    columns = c(Avg_Revenue, Avg_Profit),
+    currency = "USD",
+    decimals = 2
+  ) %>%
+  fmt_number(
+    columns = c(Avg_Margin, Weighted_Margin),
+    decimals = 2,
+    pattern = "{x}%"
+  ) %>%
+  cols_label(
+    customer_segment = "Customer Segment",
+    Orders = "Orders",
+    Total_Revenue = "Total Revenue",
+    Total_Profit = "Total Profit",
+    Avg_Revenue = "Avg. Revenue / Order",
+    Avg_Profit = "Avg. Profit / Order",
+    Avg_Margin = "Avg. Order Margin",
+    Weighted_Margin = "Weighted Margin"
+  ) %>%
+  tab_options(
+    table.font.size = px(12),
+    data_row.padding = px(7)
+  )
+```
+
+
+***Results &  Interpretation***
+
+The Consumer segment had the highest total revenue ($580.69M) and profit ($149.07M).
+
+VIP customers had the highest average revenue ($1,770.69) and profit ($455.57) per order.
+
+Although average order margins differed across segments, their revenue-weighted margins were very similar at around 25.7%
+
+
+### 4.5.2 State-Level Profitability
+
+
+```{r state-profitability}
+state_profitability <- profitability %>%
+  group_by(customer_state) %>%
+  summarise(
+    Orders = n(),
+    Total_Revenue = sum(net_merchandise_revenue),
+    Total_Profit = sum(merchandise_profit),
+    Avg_Revenue = mean(net_merchandise_revenue),
+    Avg_Margin = mean(merchandise_margin_pct),
+    Weighted_Margin = 100 * Total_Profit / Total_Revenue,
+    .groups = "drop"
+  ) %>%
+  arrange(desc(Total_Revenue))
+
+state_profitability %>%
+  slice_head(n = 10) %>%
+  gt() %>%
+  tab_header(
+    title = "Top 10 States by Net Merchandise Revenue",
+    subtitle = "Realized Orders | 2019–2025"
+  ) %>%
+  fmt_number(columns = Orders, decimals = 0) %>%
+  fmt_currency(
+    columns = c(Total_Revenue, Total_Profit),
+    currency = "USD",
+    scale_by = 1 / 1e6,
+    decimals = 2,
+    pattern = "{x}M"
+  ) %>%
+  fmt_currency(
+    columns = Avg_Revenue,
+    currency = "USD",
+    decimals = 2
+  ) %>%
+  fmt_number(
+    columns = c(Avg_Margin, Weighted_Margin),
+    decimals = 2,
+    pattern = "{x}%"
+  ) %>%
+  cols_label(
+    customer_state = "State",
+    Orders = "Orders",
+    Total_Revenue = "Total Revenue",
+    Total_Profit = "Total Profit",
+    Avg_Revenue = "Avg. Revenue / Order",
+    Avg_Margin = "Avg. Order Margin",
+    Weighted_Margin = "Weighted Margin"
+  ) %>%
+  tab_options(
+    table.font.size = px(12),
+    data_row.padding = px(6)
+  )
+```
+
+
+
+### 4.5.3 Profitability Visualization
+
+```{r top-states-revenue-chart, fig.width=9, fig.height=5}
+state_profitability %>%
+  slice_max(Total_Revenue, n = 10) %>%
+  ggplot(aes(
+    x = reorder(customer_state, Total_Revenue),
+    y = Total_Revenue / 1e6
+  )) +
+  geom_col(fill = "#4472C4") +
+  geom_text(
+    aes(label = sprintf("$%.1fM", Total_Revenue / 1e6)),
+    hjust = -0.1,
+    size = 3.5
+  ) +
+  coord_flip() +
+  scale_y_continuous(
+    labels = function(x) paste0("$", x, "M"),
+    expand = expansion(mult = c(0, 0.15))
+  ) +
+  labs(
+    title = "Top 10 States by Net Merchandise Revenue",
+    subtitle = "Realized Orders | 2019–2025",
+    x = "State",
+    y = "Net Merchandise Revenue (USD Millions)"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+
+```{r segment-weighted-margin-chart, fig.width=8, fig.height=5}
+ggplot(
+  segment_profitability,
+  aes(
+    x = reorder(customer_segment, Weighted_Margin),
+    y = Weighted_Margin
+  )
+) +
+  geom_col(fill = "#4472C4", width = 0.6) +
+  geom_text(
+    aes(label = sprintf("%.2f%%", Weighted_Margin)),
+    vjust = -0.5,
+    size = 4
+  ) +
+  scale_y_continuous(
+    labels = function(x) paste0(x, "%"),
+    limits = c(0, 30)
+  ) +
+  labs(
+    title = "Revenue-Weighted Margin by Customer Segment",
+    subtitle = "Realized Orders | 2019–2025",
+    x = "Customer Segment",
+    y = "Revenue-Weighted Merchandise Margin (%)"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+
+***Results &  Interpretation***
+
+California had the highest merchandise revenue ($228.97M), followed by Texas ($172.96M) and Florida ($125.77M)
+
+Revenue-weighted margins were similar across all customer segments, ranging from 25.67% to 25.73%.
+
+These results show that total revenue differs across states, while profitability margins remain similar across customer segments.
+
+
+# 5. Logistics Analysis
+
+## 5.1 Logistics Data Import & Validation
+
+
+```{r logistics-data-import}
+logistics <- readr::read_csv(
+  "S:/us-ecommerce-performance-analytics/data/processed/logistics_order_analysis.csv",
+  show_col_types = FALSE
+)
+
+dim(logistics)
+head(logistics, 5)
+```
+
+
+```{r logistics-data-validation}
+logistics_validation <- logistics %>%
+  summarise(
+    Total_Orders = n(),
+    Unique_Orders = n_distinct(order_id),
+    Duplicate_Orders = n() - n_distinct(order_id),
+    Missing_Delivery_Days = sum(is.na(delivery_days)),
+    Missing_Late_Status = sum(is.na(is_late_delivery)),
+    Missing_Distance = sum(is.na(item_weighted_distance_miles)),
+    Late_Orders = sum(is_late_delivery, na.rm = TRUE)
+  )
+
+logistics_validation %>%
+  tidyr::pivot_longer(
+    cols = everything(),
+    names_to = "Metric",
+    values_to = "Value"
+  ) %>%
+  gt() %>%
+  tab_header(
+    title = "Logistics Data Validation",
+    subtitle = "Delivered Orders | 2019–2025"
+  ) %>%
+  fmt_number(columns = Value, decimals = 0) %>%
+  cols_label(
+    Metric = "Validation Check",
+    Value = "Result"
+  )
+```
+
+
+***Results &  Interpretation***
+
+The dataset contains 933,748 delivered orders, with no duplicate records or missing values in the main logistics variables.
+
+a total of 92,044 orders were delivered late. The data is ready for logistics analysis.
+
+
+## 5.2 Delivery Performance Summary
+
+
+
+```{r delivery-performance-summary}
+delivery_summary <- logistics %>%
+  summarise(
+    Total_Orders = n(),
+    Late_Orders = sum(is_late_delivery),
+    On_Time_Orders = sum(!is_late_delivery),
+    Late_Rate = 100 * mean(is_late_delivery),
+    Avg_Delivery_Days = mean(delivery_days),
+    Median_Delivery_Days = median(delivery_days),
+    Avg_Estimated_Days = mean(estimated_delivery_days),
+    Avg_Delay_Days = mean(delivery_delay_days),
+    Avg_Late_Delay_Days = mean(
+      delivery_delay_days[is_late_delivery]
+    ),
+    Median_Late_Delay_Days = median(
+      delivery_delay_days[is_late_delivery]
+    )
+  )
+
+delivery_summary %>%
+  tidyr::pivot_longer(
+    cols = everything(),
+    names_to = "Metric",
+    values_to = "Value"
+  ) %>%
+  mutate(
+    Unit = case_when(
+      Metric == "Late_Rate" ~ "%",
+      grepl("Days", Metric) ~ "days",
+      TRUE ~ "orders"
+    )
+  ) %>%
+  gt() %>%
+  tab_header(
+    title = "Overall Delivery Performance",
+    subtitle = "933,748 Delivered Orders | 2019–2025"
+  ) %>%
+  fmt_number(columns = Value, decimals = 2) %>%
+  cols_label(
+    Metric = "Metric",
+    Value = "Value",
+    Unit = "Unit"
+  ) %>%
+  tab_options(
+    table.font.size = px(13),
+    data_row.padding = px(7)
+  )
+```
+
+
+
+***Results &  Interpretation***
+
+
+Out of 933,748 delivered orders, 9.86% were late, while 90.14% arrived on time or early.
+
+The average delivery time was 7.78 days, compared with an estimated 9.09 days. Overall, orders arrived about 1.31 days early on average.
+
+For late orders, the average delay was 5 days.
+
+
+## 5.3 Delivery Time and Delay Distributions
+
+
+```{r delivery-time-histogram, fig.width=9, fig.height=5}
+ggplot(logistics, aes(x = delivery_days)) +
+  geom_histogram(
+    bins = 70,
+    fill = "#4472C4",
+    color = "white"
+  ) +
+  geom_vline(
+    xintercept = mean(logistics$delivery_days),
+    color = "#D55E00",
+    linetype = "dashed",
+    linewidth = 1
+  ) +
+  geom_vline(
+    xintercept = median(logistics$delivery_days),
+    color = "#009E73",
+    linetype = "dotted",
+    linewidth = 1
+  ) +
+  scale_y_continuous(
+    labels = scales::label_comma()
+  ) +
+  labs(
+    title = "Distribution of Delivery Time",
+    subtitle = "933,748 Delivered Orders | 2019–2025",
+    x = "Delivery Time (Days)",
+    y = "Number of Orders",
+    caption = "Dashed line: Mean | Dotted line: Median"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+
+
+```{r delivery-delay-histogram, fig.width=9, fig.height=5}
+ggplot(logistics, aes(x = delivery_delay_days)) +
+  geom_histogram(
+    bins = 70,
+    fill = "#4472C4",
+    color = "white"
+  ) +
+  geom_vline(
+    xintercept = 0,
+    color = "#D55E00",
+    linetype = "dashed",
+    linewidth = 1
+  ) +
+  scale_y_continuous(
+    labels = scales::label_comma()
+  ) +
+  labs(
+    title = "Distribution of Delivery Delay",
+    subtitle = "933,748 Delivered Orders | 2019–2025",
+    x = "Delivery Delay (Days)",
+    y = "Number of Orders",
+    caption = "Dashed line: Scheduled delivery threshold (0 days)"
+  ) +
+  theme_minimal(base_size = 12)
+
+
+```
+
+***Results &  Interpretation***
+
+Delivery time shows a right-skewed distribution, with most orders arriving within 5-10 days.
+
+Delivery delays are concentrated around two values: -2 days for early deliveries and +5 days for late deliveries.
+
+This pattern may be related to how the synthetic dataset was generated.
+
+
+
+
+```{r delivery-delay-unique-values}
+logistics %>%
+  count(delivery_delay_days, name = "Orders") %>%
+  mutate(
+    Share_Pct = 100 * Orders / sum(Orders)
+  ) %>%
+  arrange(delivery_delay_days) %>%
+  gt() %>%
+  tab_header(
+    title = "Delivery Delay Values",
+    subtitle = "933,748 Delivered Orders | 2019–2025"
+  ) %>%
+  fmt_number(columns = Orders, decimals = 0) %>%
+  fmt_number(
+    columns = Share_Pct,
+    decimals = 2,
+    pattern = "{x}%"
+  ) %>%
+  cols_label(
+    delivery_delay_days = "Delivery Delay (Days)",
+    Orders = "Orders",
+    Share_Pct = "Share of Orders"
+  )
+```
+
+
+***Results & Interpretation***
+
+Delivery delays had only two values. Most orders (90.14%) arrived 2 days early, while 9.86% arrived 5 days late.
+
+This fixed pattern may come from the synthetic data-generation process and limits the variation in delivery delays.
+
+
+
+## 5.4 Shipping Distance and Delivery Performance
+
+
+
+```{r distance-delivery-summary}
+distance_delivery_summary <- logistics %>%
+  group_by(distance_band) %>%
+  summarise(
+    Orders = n(),
+    Avg_Distance_Miles = mean(item_weighted_distance_miles),
+    Avg_Delivery_Days = mean(delivery_days),
+    Late_Orders = sum(is_late_delivery),
+    Late_Rate = 100 * mean(is_late_delivery),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    distance_band = factor(
+      distance_band,
+      levels = c(
+        "Under 100 miles",
+        "100-299 miles",
+        "300-599 miles",
+        "600-999 miles",
+        "1,000+ miles"
+      )
+    )
+  ) %>%
+  arrange(distance_band)
+
+distance_delivery_summary %>%
+  gt() %>%
+  tab_header(
+    title = "Delivery Performance by Shipping Distance",
+    subtitle = "933,748 Delivered Orders | 2019–2025"
+  ) %>%
+  fmt_number(
+    columns = c(Orders, Late_Orders),
+    decimals = 0
+  ) %>%
+  fmt_number(
+    columns = c(Avg_Distance_Miles, Avg_Delivery_Days),
+    decimals = 2
+  ) %>%
+  fmt_number(
+    columns = Late_Rate,
+    decimals = 2,
+    pattern = "{x}%"
+  ) %>%
+  cols_label(
+    distance_band = "Distance Band",
+    Orders = "Orders",
+    Avg_Distance_Miles = "Avg. Distance (Miles)",
+    Avg_Delivery_Days = "Avg. Delivery (Days)",
+    Late_Orders = "Late Orders",
+    Late_Rate = "Late Rate"
+  ) %>%
+  tab_options(
+    table.font.size = px(13),
+    data_row.padding = px(7)
+  )
+```
+
+***Results & Interpretation***
+
+Average delivery time increased with shipping distance, from 4.21 days for orders under 100 miles to 8.77 days for order over 1,000 miles.
+
+However, late delivery rates remained close to 10% across all distance groups.
+
+This suggests that longer distances are associated with longer delivery times, but not clearly with higher late delivery rates.
+
+
+### 5.4.2 Shipping Distance Correlation
+
+
+
+```{r distance-delivery-correlation}
+distance_cor <- tibble::tibble(
+  Relationship = c(
+    "Distance vs. Delivery Time",
+    "Distance vs. Late Delivery"
+  ),
+  Pearson = c(
+    cor(logistics$item_weighted_distance_miles,
+        logistics$delivery_days, method = "pearson"),
+    cor(logistics$item_weighted_distance_miles,
+        as.integer(logistics$is_late_delivery),
+        method = "pearson")
+  ),
+  Spearman = c(
+    cor(logistics$item_weighted_distance_miles,
+        logistics$delivery_days, method = "spearman"),
+    cor(logistics$item_weighted_distance_miles,
+        as.integer(logistics$is_late_delivery),
+        method = "spearman")
+  )
+)
+
+distance_cor %>%
+  gt() %>%
+  tab_header(
+    title = "Shipping Distance Correlations",
+    subtitle = "933,748 Delivered Orders | 2019–2025"
+  ) %>%
+  fmt_number(
+    columns = c(Pearson, Spearman),
+    decimals = 4
+  )
+```
+
+
+***Results & Interpreation***
+
+Shipping distance had a positive correlation with delivery time (Pearson = 0.5111, Spearman = 0.7983). Longer distances were associated with longer delivery times.
+
+However, distance had almost no correlation with late delivery status (Pearson = 0.0007).
+
+This suggests that shipping distance is related to delivery time but not clearly related to whether an order arrives late.
+
+
+
+## 5.5 Delivery Performance by Customer Segment and State
+
+### 5.5.1 Delivery Performance by Customer Segment
+
+
+
+```{r logistics-customer-segment}
+segment_delivery <- logistics %>%
+  group_by(customer_segment) %>%
+  summarise(
+    Orders = n(),
+    Late_Orders = sum(is_late_delivery),
+    Late_Rate = 100 * mean(is_late_delivery),
+    Avg_Delivery_Days = mean(delivery_days),
+    Avg_Distance_Miles = mean(item_weighted_distance_miles),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(Orders))
+
+segment_delivery %>%
+  gt() %>%
+  tab_header(
+    title = "Delivery Performance by Customer Segment",
+    subtitle = "933,748 Delivered Orders | 2019–2025"
+  ) %>%
+  fmt_number(
+    columns = c(Orders, Late_Orders),
+    decimals = 0
+  ) %>%
+  fmt_number(
+    columns = c(Avg_Delivery_Days, Avg_Distance_Miles),
+    decimals = 2
+  ) %>%
+  fmt_number(
+    columns = Late_Rate,
+    decimals = 2,
+    pattern = "{x}%"
+  ) %>%
+  cols_label(
+    customer_segment = "Customer Segment",
+    Orders = "Orders",
+    Late_Orders = "Late Orders",
+    Late_Rate = "Late Rate",
+    Avg_Delivery_Days = "Avg. Delivery (Days)",
+    Avg_Distance_Miles = "Avg. Distance (Miles)"
+  ) %>%
+  tab_options(
+    table.font.size = px(13),
+    data_row.padding = px(7)
+  )
+```
+
+***Results & Interpretation***
+
+Delivery performance was similar across all customer segments. Late delivery rates ranged from 9.82% to 10.01%
+
+Average delivery times were around 7.8 days, and shipping distances were close to 1,260 miles for all groups.
+
+This suggests that customer segments had similar delivery performance.
+
+
+### 5.5.2 Delivery Performance by State
+
+
+
+```{r logistics-state-summary}
+state_delivery <- logistics %>%
+  group_by(customer_state) %>%
+  summarise(
+    Orders = n(),
+    Late_Orders = sum(is_late_delivery),
+    Late_Rate = 100 * mean(is_late_delivery),
+    Avg_Delivery_Days = mean(delivery_days),
+    Avg_Distance_Miles = mean(item_weighted_distance_miles),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(Orders))
+
+state_delivery %>%
+  slice_head(n = 10) %>%
+  gt() %>%
+  tab_header(
+    title = "Delivery Performance by State",
+    subtitle = "Top 10 States by Order Volume | 2019–2025"
+  ) %>%
+  fmt_number(
+    columns = c(Orders, Late_Orders),
+    decimals = 0
+  ) %>%
+  fmt_number(
+    columns = c(Avg_Delivery_Days, Avg_Distance_Miles),
+    decimals = 2
+  ) %>%
+  fmt_number(
+    columns = Late_Rate,
+    decimals = 2,
+    pattern = "{x}%"
+  ) %>%
+  cols_label(
+    customer_state = "State",
+    Orders = "Orders",
+    Late_Orders = "Late Orders",
+    Late_Rate = "Late Rate",
+    Avg_Delivery_Days = "Avg. Delivery (Days)",
+    Avg_Distance_Miles = "Avg. Distance (Miles)"
+  ) %>%
+  tab_options(
+    table.font.size = px(12),
+    data_row.padding = px(6)
+  )
+```
+
+
+***Results & Interpretation***
+
+Late delivery rates were similar across the top 10 states, ranging from 9.79% to 10.02%.
+
+Washington had the longest average delivery time (9.14 days) and shipping distance (1,684.42 miles).
+
+This suggests that delivery times vary across states, while late delivery rates remain close to 10%.
+
+
+## 5.6 Logistics Analysis Summary
+
+The overall late delivery rate was 9.86%, with an average delivery time of 7.78 days.
+
+Shipping distance was positively related to delivery time (Spearman = 0.7983), but had almost no relationship with late delivery status.
+
+Late delivery rates were similar across customer segments, states, and distance groups.
+
+Delivery delays had only two values (-2 and +5 days), which may reflect how the synthetic data was generated.
+
+
+# 6. Customer Satisfaction Analysis
+
+## 6.1 Satisfaction Data Import and Validation
+
+
+
+```{r satisfaction-data-import}
+satisfaction <- readr::read_csv(
+  "S:/us-ecommerce-performance-analytics/data/processed/satisfaction_order_analysis.csv",
+  show_col_types = FALSE
+)
+
+dim(satisfaction)
+head(satisfaction, 5)
+```
+
+
+```{r satisfaction-data-validation}
+satisfaction_validation <- satisfaction %>%
+  summarise(
+    Total_Orders = n(),
+    Unique_Orders = n_distinct(order_id),
+    Duplicate_Orders = n() - n_distinct(order_id),
+    Missing_Scores = sum(is.na(review_score)),
+    Invalid_Scores = sum(
+      !is.na(review_score) & !(review_score %in% 1:5)
+    ),
+    Missing_Negative_Flags = sum(is.na(is_negative_review)),
+    Flag_Mismatches = sum(
+      !is.na(review_score) &
+      !is.na(is_negative_review) &
+      (is_negative_review != (review_score <= 2)),
+      na.rm = TRUE
+    ),
+    Negative_Reviews = sum(is_negative_review, na.rm = TRUE)
+  )
+
+satisfaction_validation %>%
+  tidyr::pivot_longer(
+    cols = everything(),
+    names_to = "Metric",
+    values_to = "Value"
+  ) %>%
+  gt() %>%
+  tab_header(
+    title = "Satisfaction Data Validation",
+    subtitle = "933,748 Delivered Orders | 2019–2025"
+  ) %>%
+  fmt_number(columns = Value, decimals = 0) %>%
+  cols_label(
+    Metric = "Validation Check",
+    Value = "Result"
+  )
+```
+
+***Results & Interpretation***
+
+The dataset contains 933,748 orders, with no duplicate records, missing review scores, or incorrect negative review flags.
+
+A total of 161,108 orders (17.25%) received negative reviews. The dataset is ready for customer satisfaction analysis.
+
+
+## 6.2 Review Score Distribution
+
+
+```{r review-score-summary}
+review_summary <- satisfaction %>%
+  count(review_score, name = "Orders") %>%
+  mutate(
+    Share_Pct = 100 * Orders / sum(Orders)
+  ) %>%
+  arrange(review_score)
+
+review_summary %>%
+  gt() %>%
+  tab_header(
+    title = "Customer Review Score Distribution",
+    subtitle = "933,748 Delivered Orders | 2019–2025"
+  ) %>%
+  fmt_number(
+    columns = Orders,
+    decimals = 0
+  ) %>%
+  fmt_number(
+    columns = Share_Pct,
+    decimals = 2,
+    pattern = "{x}%"
+  ) %>%
+  cols_label(
+    review_score = "Review Score",
+    Orders = "Orders",
+    Share_Pct = "Share of Orders"
+  ) %>%
+  tab_options(
+    table.font.size = px(13),
+    data_row.padding = px(7)
+  )
+```
+
+
+***Results & Interpretation***
+
+Most customers gave high review scores. About 75.37% of orders received 4 or 5 stars, with 5 stars being the most common rating (50.26%).
+
+Negative reviews (1-2 stars) accounted for 17.25% of orders.
+
+
+```{r review-score-chart, fig.width=9, fig.height=5}
+ggplot(review_summary, aes(
+  x = factor(review_score),
+  y = Orders
+)) +
+  geom_col(
+    fill = "#4472C4",
+    width = 0.65
+  ) +
+  geom_text(
+    aes(label = sprintf("%.2f%%", Share_Pct)),
+    vjust = -0.5,
+    size = 4
+  ) +
+  scale_y_continuous(
+    labels = scales::label_comma(),
+    expand = expansion(mult = c(0, 0.12))
+  ) +
+  labs(
+    title = "Distribution of Customer Review Scores",
+    subtitle = "933,748 Delivered Orders | 2019–2025",
+    x = "Review Score (1–5 Stars)",
+    y = "Number of Orders"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+***Results & Interpretation***
+
+Most orders received high review scores. About 75.37% received 4 or 5 stars, while 17.25% received negative reviews (1-2 stars).
+
+Five stars was the most common score, accounting for 50.26% of all orders.
+
+## 6.3 Late Delivery and Customer Satisfaction
+
+
+```{r satisfaction-by-delivery-status}
+delivery_satisfaction <- satisfaction %>%
+  mutate(
+    Delivery_Status = if_else(
+      is_late_delivery,
+      "Late",
+      "On Time / Early"
+    )
+  ) %>%
+  group_by(Delivery_Status) %>%
+  summarise(
+    Orders = n(),
+    Avg_Review_Score = mean(review_score),
+    Median_Review_Score = median(review_score),
+    Negative_Reviews = sum(is_negative_review),
+    Negative_Review_Rate = 100 * mean(is_negative_review),
+    .groups = "drop"
+  )
+
+delivery_satisfaction %>%
+  gt() %>%
+  tab_header(
+    title = "Customer Satisfaction by Delivery Status",
+    subtitle = "933,748 Delivered Orders | 2019–2025"
+  ) %>%
+  fmt_number(
+    columns = c(Orders, Negative_Reviews),
+    decimals = 0
+  ) %>%
+  fmt_number(
+    columns = c(Avg_Review_Score, Median_Review_Score),
+    decimals = 2
+  ) %>%
+  fmt_number(
+    columns = Negative_Review_Rate,
+    decimals = 2,
+    pattern = "{x}%"
+  ) %>%
+  cols_label(
+    Delivery_Status = "Delivery Status",
+    Orders = "Orders",
+    Avg_Review_Score = "Avg. Review Score",
+    Median_Review_Score = "Median Review Score",
+    Negative_Reviews = "Negative Reviews",
+    Negative_Review_Rate = "Negative Review Rate"
+  ) %>%
+  tab_options(
+    table.font.size = px(13),
+    data_row.padding = px(7)
+  )
+```
+
+
+***Results & Interpretation***
+
+All late orders received negative reviews (1-2 stars), with an average score of 1.50.
+
+On-time or early orders had a higher average score of 4.31 and a negative review rate of 8.21%.
+
+This strong relationship may come from the synthetic data-genaration process and should not be treated as proof of causation.
+
+
+```{r poster-delivery-review, fig.width=8, fig.height=4.8}
+poster_delivery <- delivery_satisfaction %>%
+  mutate(
+    Status = factor(
+      Delivery_Status,
+      levels = c("Late", "On Time / Early")
+    )
+  )
+
+delivery_review_plot <- ggplot(
+  poster_delivery,
+  aes(x = Negative_Review_Rate, y = Status, fill = Status)
+) +
+  geom_col(width = 0.55) +
+
+  # Labels inside long bars and outside short bars
+  geom_text(
+    aes(
+      label = sprintf("%.2f%%", Negative_Review_Rate),
+      hjust = ifelse(Negative_Review_Rate > 50, 1.15, -0.15),
+      color = Status
+    ),
+    size = 7,
+    fontface = "bold",
+    show.legend = FALSE
+  ) +
+
+  # Bar colors
+  scale_fill_manual(
+    values = c(
+      "On Time / Early" = "#2c7d00",
+      "Late" = "#c40000"
+    )
+  ) +
+
+  # Label colors
+  scale_color_manual(
+    values = c(
+      "On Time / Early" = "#2c7d00",
+      "Late" = "#FFFFFF"
+    )
+  ) +
+
+  scale_x_continuous(
+    limits = c(0, 100),
+    breaks = seq(0, 100, 25),
+    labels = function(x) paste0(x, "%"),
+    expand = expansion(mult = c(0, 0.03))
+  ) +
+
+  scale_y_discrete(
+    expand = expansion(add = 0.6)
+  ) +
+
+  labs(
+    title = "Negative Reviews by Delivery Status",
+    subtitle = "Negative reviews = 1–2 stars",
+    x = "Orders with negative reviews (%)",
+    y = NULL,
+    caption = paste(
+      "Synthetic data | Delivered orders, 2019–2025",
+      "The 100% pattern may reflect simulation rules.",
+      "This association does not establish causation.",
+      sep = "\n"
+    )
+  ) +
+
+  theme_minimal(base_size = 18) +
+  theme(
+    legend.position = "none",
+
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_line(
+      color = "#E8E8E8",
+      linewidth = 0.4
+    ),
+
+    axis.text.y = element_text(
+      size = 17,
+      face = "bold",
+      color = "#0C2340",
+      margin = margin(r = 10)
+    ),
+    axis.text.x = element_text(
+      size = 13,
+      color = "#555555"
+    ),
+    axis.title.x = element_text(
+      size = 14,
+      margin = margin(t = 10)
+    ),
+
+    plot.title = element_text(
+      size = 22,
+      face = "bold",
+      color = "#0C2340",
+      lineheight = 1.05,
+      margin = margin(b = 8)
+    ),
+    plot.subtitle = element_text(
+      size = 14,
+      color = "#555555",
+      margin = margin(b = 15)
+    ),
+    plot.caption = element_text(
+      size = 10,
+      color = "#666666",
+      hjust = 0,
+      lineheight = 1.1,
+      margin = margin(t = 15)
+    ),
+
+    plot.margin = margin(15, 20, 15, 15),
+    plot.background = element_rect(
+      fill = "white",
+      color = NA
+    )
+  )
+
+delivery_review_plot
+```
+
+### 6.3.1 Review Scores by Delivery Status
+
+
+
+```{r review-score-by-delivery-status}
+review_delivery_distribution <- satisfaction %>%
+  mutate(
+    Delivery_Status = if_else(
+      is_late_delivery,
+      "Late",
+      "On Time / Early"
+    )
+  ) %>%
+  count(Delivery_Status, review_score, name = "Orders") %>%
+  group_by(Delivery_Status) %>%
+  mutate(
+    Share_Pct = 100 * Orders / sum(Orders)
+  ) %>%
+  ungroup()
+
+review_delivery_distribution %>%
+  gt(groupname_col = "Delivery_Status") %>%
+  tab_header(
+    title = "Review Score Distribution by Delivery Status",
+    subtitle = "933,748 Delivered Orders | 2019–2025"
+  ) %>%
+  fmt_number(columns = Orders, decimals = 0) %>%
+  fmt_number(
+    columns = Share_Pct,
+    decimals = 2,
+    pattern = "{x}%"
+  ) %>%
+  cols_label(
+    review_score = "Review Score",
+    Orders = "Orders",
+    Share_Pct = "Share of Group"
+  ) %>%
+  tab_options(
+    table.font.size = px(13),
+    data_row.padding = px(7)
+  )
+```
+
+
+***Results & Interpretation***
+
+All late orders received 1 or 2 stars, while on-time or early orders received scores from 2 to 5 stars.
+
+No late orders received 3-5 stars, and no on-time orders received 1 star.
+
+This unusual pattern may be related to how the synthetic data was generated.
+
+## 6.4 Shipping Distance and Customer Satisfaction
+
+
+```{r satisfaction-by-distance}
+distance_satisfaction <- satisfaction %>%
+  group_by(distance_band) %>%
+  summarise(
+    Orders = n(),
+    Avg_Review_Score = mean(review_score),
+    Negative_Reviews = sum(is_negative_review),
+    Negative_Rate = 100 * mean(is_negative_review),
+    Late_Rate = 100 * mean(is_late_delivery),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    distance_band = factor(
+      distance_band,
+      levels = c(
+        "Under 100 miles",
+        "100-299 miles",
+        "300-599 miles",
+        "600-999 miles",
+        "1,000+ miles"
+      )
+    )
+  ) %>%
+  arrange(distance_band)
+
+distance_satisfaction %>%
+  gt() %>%
+  tab_header(
+    title = "Customer Satisfaction by Shipping Distance",
+    subtitle = "933,748 Delivered Orders | 2019–2025"
+  ) %>%
+  fmt_number(
+    columns = c(Orders, Negative_Reviews),
+    decimals = 0
+  ) %>%
+  fmt_number(
+    columns = Avg_Review_Score,
+    decimals = 2
+  ) %>%
+  fmt_number(
+    columns = c(Negative_Rate, Late_Rate),
+    decimals = 2,
+    pattern = "{x}%"
+  ) %>%
+  cols_label(
+    distance_band = "Distance Band",
+    Orders = "Orders",
+    Avg_Review_Score = "Avg. Review Score",
+    Negative_Reviews = "Negative Reviews",
+    Negative_Rate = "Negative Review Rate",
+    Late_Rate = "Late Delivery Rate"
+  ) %>%
+  tab_options(
+    table.font.size = px(13),
+    data_row.padding = px(7)
+  )
+```
+
+***Results & Interpretation***
+
+Average review scores were similar across most distance groups, ranging from 3.94 to 4.15.
+
+Orders under 100 miles had the lowest negative review rate (14.60%), while orders between 100 and 299 miles had the highest (19.35%).
+
+Overall, there was no clear pattern showing that longer shipping distances were associated with lower customer satisfaction.
+
+## 6.5 Customer Satisfaction by Segment and State
+
+### 6.5.1 Customer Satisfaction by Customer Segment.
+
+
+```{r satisfaction-customer-segment}
+segment_satisfaction <- satisfaction %>%
+  group_by(customer_segment) %>%
+  summarise(
+    Orders = n(),
+    Avg_Review_Score = mean(review_score),
+    Negative_Reviews = sum(is_negative_review),
+    Negative_Rate = 100 * mean(is_negative_review),
+    Late_Rate = 100 * mean(is_late_delivery),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(Orders))
+
+segment_satisfaction %>%
+  gt() %>%
+  tab_header(
+    title = "Customer Satisfaction by Customer Segment",
+    subtitle = "933,748 Delivered Orders | 2019–2025"
+  ) %>%
+  fmt_number(
+    columns = c(Orders, Negative_Reviews),
+    decimals = 0
+  ) %>%
+  fmt_number(
+    columns = Avg_Review_Score,
+    decimals = 2
+  ) %>%
+  fmt_number(
+    columns = c(Negative_Rate, Late_Rate),
+    decimals = 2,
+    pattern = "{x}%"
+  ) %>%
+  cols_label(
+    customer_segment = "Customer Segment",
+    Orders = "Orders",
+    Avg_Review_Score = "Avg. Review Score",
+    Negative_Reviews = "Negative Reviews",
+    Negative_Rate = "Negative Review Rate",
+    Late_Rate = "Late Delivery Rate"
+  ) %>%
+  tab_options(
+    table.font.size = px(13),
+    data_row.padding = px(7)
+  )
+```
+
+
+***Results & Interpretation***
+
+Consumer and Corporate customers had similar average review scores of 4.05.
+
+VIP customers had a lower average score of 3.87 and the highest negative review rate (21.01%).
+
+Late delivery rates were similar across all three groups, suggesting that delivery delays alone may not explain the difference in customer satisfaction.
+
+
+### 6.5.2 Customer Satisfaction by State
+
+
+
+```{r satisfaction-by-state}
+state_satisfaction <- satisfaction %>%
+  group_by(customer_state) %>%
+  summarise(
+    Orders = n(),
+    Avg_Review_Score = mean(review_score),
+    Negative_Reviews = sum(is_negative_review),
+    Negative_Rate = 100 * mean(is_negative_review),
+    Late_Rate = 100 * mean(is_late_delivery),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(Orders))
+
+state_satisfaction %>%
+  slice_head(n = 10) %>%
+  gt() %>%
+  tab_header(
+    title = "Customer Satisfaction by State",
+    subtitle = "Top 10 States by Order Volume | 2019–2025"
+  ) %>%
+  fmt_number(
+    columns = c(Orders, Negative_Reviews),
+    decimals = 0
+  ) %>%
+  fmt_number(
+    columns = Avg_Review_Score,
+    decimals = 2
+  ) %>%
+  fmt_number(
+    columns = c(Negative_Rate, Late_Rate),
+    decimals = 2,
+    pattern = "{x}%"
+  ) %>%
+  cols_label(
+    customer_state = "State",
+    Orders = "Orders",
+    Avg_Review_Score = "Avg. Review Score",
+    Negative_Reviews = "Negative Reviews",
+    Negative_Rate = "Negative Review Rate",
+    Late_Rate = "Late Delivery Rate"
+  ) %>%
+  tab_options(
+    table.font.size = px(12),
+    data_row.padding = px(6)
+  )
+```
+
+
+***Results & Interpretation***
+
+Customer satisfaction was similar across the top 10 states, with average review scores between 4.03 and 4.05.
+
+Negative review rates ranged from 16.96% in Washington to 17.44% in Georgia.
+
+Overall, Customer satisfaction did not vary much across the states.
+
+
+## 6.6 Customer Satisfaction Summary
+
+Most orders (75.37%) received 4-5 stars, while 17.25% received negative reviews.
+
+All late deliveries received negative reviews, suggesting a strong relationship between delivery status and customer satisfaction.
+
+VIP customers had the highest negative review rate (21.01%), while satisfaction was similar across states.
+
+These patterns may be influenced by how the synthetic dataset was generated.
+
+
+# 7. Statistical Tests and Robustness Analysis
+
+## 7.1 Research Questions and Statistical Testing Plan
+
+Four research questions are examined :
+
+1. Does merchandise profit margin differ across customer segments?
+2. Is shipping distance associated with delivery time?
+3. Is late delivery associated with negative reviews?
+4. Do negative review rates differ across customer segments?
+
+I use the Kruskal-Wallis test, Spearman correlation, and Chi-square tests based on the variables being analyzed.
+
+## 7.2 Profit Margin Differences Across Customer Segments
+
+
+
+```{r margin-by-segment-summary}
+margin_segment_summary <- profitability %>%
+  group_by(customer_segment) %>%
+  summarise(
+    Orders = n(),
+    Mean_Margin = mean(merchandise_margin_pct, na.rm = TRUE),
+    Median_Margin = median(merchandise_margin_pct, na.rm = TRUE),
+    SD_Margin = sd(merchandise_margin_pct, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(Orders))
+
+margin_segment_summary %>%
+  gt() %>%
+  tab_header(
+    title = "Merchandise Profit Margin by Customer Segment",
+    subtitle = "Descriptive Statistics | 2019–2025"
+  ) %>%
+  fmt_number(
+    columns = Orders,
+    decimals = 0
+  ) %>%
+  fmt_number(
+    columns = c(Mean_Margin, Median_Margin),
+    decimals = 2,
+    pattern = "{x}%"
+  ) %>%
+  fmt_number(
+    columns = SD_Margin,
+    decimals = 2
+  ) %>%
+  cols_label(
+    customer_segment = "Customer Segment",
+    Orders = "Orders",
+    Mean_Margin = "Mean Margin",
+    Median_Margin = "Median Margin",
+    SD_Margin = "SD (Percentage Points)"
+  ) %>%
+  tab_options(
+    table.font.size = px(13),
+    data_row.padding = px(7)
+  )
+```
+
+***Results & Interpretation***
+
+Consumer and Corporate customers had similar average merchandise margins of 36.66% and 36.74%.
+
+VIP customers had a lower average margin of 32.34% and a lower median margin of 27.28%.
+
+This suggests that VIP orders genearlly had lower merchandise profit margins than the other customer segments.
+
+```{r poster-margin-plot, fig.width=8, fig.height=5}
+# Calculate mean margins and 95% confidence intervals
+poster_margin <- profitability %>%
+  group_by(customer_segment) %>%
+  summarise(
+    N = sum(!is.na(merchandise_margin_pct)),
+    Mean = mean(merchandise_margin_pct, na.rm = TRUE),
+    SD = sd(merchandise_margin_pct, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    SE = SD / sqrt(N),
+    CI_Lower = Mean - qt(0.975, df = N - 1) * SE,
+    CI_Upper = Mean + qt(0.975, df = N - 1) * SE,
+    Segment = factor(
+      customer_segment,
+      levels = c("vip", "corporate", "consumer"),
+      labels = c("VIP", "Corporate", "Consumer")
+    )
+  )
+
+margin_plot <- ggplot(
+  poster_margin,
+  aes(x = Mean, y = Segment, fill = Segment)
+) +
+  geom_col(width = 0.55) +
+  geom_text(
+    aes(label = sprintf("%.2f%%", Mean)),
+    hjust = 1.15,
+    color = "white",
+    size = 7,
+    fontface = "bold"
+  ) +
+  scale_fill_manual(
+  values = c(
+    "Consumer"  = "#0C2340",
+    "Corporate" = "#2878B5",
+    "VIP"       = "#F15A22"
+  )
+) +
+  scale_x_continuous(
+    limits = c(0, 40),
+    breaks = seq(0, 40, 10),
+    labels = function(x) paste0(x, "%"),
+    expand = expansion(mult = c(0, 0.02))
+  ) +
+  scale_y_discrete(
+    expand = expansion(add = 0.6)
+  ) +
+  labs(
+    title = "VIP Orders Have Lower Mean Margins",
+    subtitle = "Average merchandise margin per order",
+    x = NULL,
+    y = NULL,
+    caption = paste(
+      "Synthetic data | Delivered orders, 2019–2025",
+      "Merchandise margin excludes shipping operating costs",
+      "and other business expenses.",
+      sep = "\n"
+    )
+  ) +
+  theme_minimal(base_size = 18) +
+  theme(
+    legend.position = "none",
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_line(
+      color = "#E8E8E8", linewidth = 0.4
+    ),
+    axis.text.y = element_text(
+      size = 18, face = "bold", color = "#0C2340"
+    ),
+    axis.text.x = element_text(
+      size = 13, color = "#555555"
+    ),
+    plot.title = element_text(
+      size = 22, face = "bold", color = "#0C2340",
+      margin = margin(b = 8)
+    ),
+    plot.subtitle = element_text(
+      size = 15, color = "#555555",
+      margin = margin(b = 18)
+    ),
+    plot.caption = element_text(
+      size = 10, color = "#666666",
+      hjust = 0, margin = margin(t = 15)
+    ),
+    plot.margin = margin(15, 20, 15, 15),
+    plot.background = element_rect(
+      fill = "white", color = NA
+    )
+  )
+
+margin_plot
+```
+
+
+
+
+
+### 7.2.1 Kruskal-Wallis Test
+
+
+
+```{r margin-kruskal-wallis}
+kw_result <- kruskal.test(
+  merchandise_margin_pct ~ customer_segment,
+  data = profitability
+)
+
+H <- unname(kw_result$statistic)
+N <- sum(complete.cases(
+  profitability[, c("merchandise_margin_pct", "customer_segment")]
+))
+k <- n_distinct(profitability$customer_segment)
+
+epsilon_squared <- max(0, (H - k + 1) / (N - k))
+
+kw_summary <- tibble(
+  Test = "Kruskal-Wallis",
+  H_Statistic = H,
+  Degrees_of_Freedom = unname(kw_result$parameter),
+  P_Value = kw_result$p.value,
+  Epsilon_Squared = epsilon_squared
+)
+
+kw_summary %>%
+  mutate(
+    P_Value = format.pval(P_Value, digits = 3, eps = 1e-16)
+  ) %>%
+  gt() %>%
+  tab_header(
+    title = "Kruskal-Wallis Test: Merchandise Profit Margin",
+    subtitle = "Comparison Across Customer Segments"
+  ) %>%
+  fmt_number(
+    columns = c(H_Statistic, Epsilon_Squared),
+    decimals = 4
+  ) %>%
+  cols_label(
+    Test = "Statistical Test",
+    H_Statistic = "H Statistic",
+    Degrees_of_Freedom = "df",
+    P_Value = "P-value",
+    Epsilon_Squared = "Epsilon-Squared"
+  )
+```
+
+
+***Results & Interpretation***
+
+The Kruskal-Wallis test found a statistically significant difference in merchandise profit margin distributions across customer segments (H = 3,227.88, p < 0.001).
+
+However, the effect size was very small (ε^2 = 0.0035), suggesting that the overall difference between segments was limited despite the large sample size.
+
+
+### 7.2.2 Pairwise Comparisons
+
+
+
+```{r margin-pairwise-comparisons}
+pairwise_result <- pairwise.wilcox.test(
+  x = profitability$merchandise_margin_pct,
+  g = profitability$customer_segment,
+  p.adjust.method = "holm",
+  exact = FALSE
+)
+
+pairwise_result
+```
+
+***Results & Interpretation***
+
+Pairwise Wilcoxon tests with Holm adjustment found significant differences between VIP and Consumer, and between VIP and Corporate (adjusted p < 0.001).
+
+No statistically significant difference was found between Consumer and Corporate (adjusted p = 0.12).
+
+VIP orders also had lower mean and median merchandise margins than the other two groups.
+
+
+### 7.2.3 Mean Margin Difference and Confidence Intervals
+
+
+
+```{r margin-difference-ci}
+segment_stats <- profitability %>%
+  group_by(customer_segment) %>%
+  summarise(
+    n = sum(!is.na(merchandise_margin_pct)),
+    Mean = mean(merchandise_margin_pct, na.rm = TRUE),
+    Variance = var(merchandise_margin_pct, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+segment_pairs <- data.frame(
+  Group_A = c("consumer", "consumer", "corporate"),
+  Group_B = c("corporate", "vip", "vip")
+)
+
+margin_ci <- segment_pairs %>%
+  left_join(
+    segment_stats,
+    by = c("Group_A" = "customer_segment")
+  ) %>%
+  rename(n_A = n, Mean_A = Mean, Var_A = Variance) %>%
+  left_join(
+    segment_stats,
+    by = c("Group_B" = "customer_segment")
+  ) %>%
+  rename(n_B = n, Mean_B = Mean, Var_B = Variance) %>%
+  mutate(
+    Mean_Difference = Mean_A - Mean_B,
+    SE = sqrt(Var_A / n_A + Var_B / n_B),
+    CI_Lower = Mean_Difference - 1.96 * SE,
+    CI_Upper = Mean_Difference + 1.96 * SE,
+    Comparison = paste(Group_A, "vs", Group_B)
+  ) %>%
+  select(Comparison, Mean_Difference, CI_Lower, CI_Upper)
+
+margin_ci %>%
+  gt() %>%
+  tab_header(
+    title = "Mean Margin Differences by Customer Segment",
+    subtitle = "95% Confidence Intervals | Percentage Points"
+  ) %>%
+  fmt_number(
+    columns = c(Mean_Difference, CI_Lower, CI_Upper),
+    decimals = 2
+  ) %>%
+  cols_label(
+    Comparison = "Comparison",
+    Mean_Difference = "Mean Difference (pp)",
+    CI_Lower = "95% CI Lower",
+    CI_Upper = "95% CI Upper"
+  )
+```
+
+***Results & Interpretation***
+
+Consumer and Corporate had similar mean merchandise margins, with a difference of only -0.08 percentage points (95% CI: -0.17 to 0.01).
+
+Consumer and Corporate had higher mean margins than VIP by 4.32 and 4.40 percentage points, respectively.
+
+These results show a measurable difference for VIP orders, although the overall Kruskal-Wallis effect size was very small.
+
+
+## 7.3 Shipping Distance and Delivery Time
+
+
+```{r distance-delivery-spearman}
+distance_delivery_test <- cor.test(
+  x = logistics$item_weighted_distance_miles,
+  y = logistics$delivery_days,
+  method = "spearman",
+  exact = FALSE
+)
+
+distance_delivery_summary <- tibble(
+  Test = "Spearman Correlation",
+  Sample_Size = sum(complete.cases(
+    logistics[, c("item_weighted_distance_miles", "delivery_days")]
+  )),
+  Spearman_Rho = unname(distance_delivery_test$estimate),
+  P_Value = format.pval(
+    distance_delivery_test$p.value,
+    digits = 3,
+    eps = 1e-16
+  )
+)
+
+distance_delivery_summary %>%
+  gt() %>%
+  tab_header(
+    title = "Shipping Distance and Delivery Time",
+    subtitle = "Spearman Correlation Test | 2019–2025"
+  ) %>%
+  fmt_number(columns = Sample_Size, decimals = 0) %>%
+  fmt_number(columns = Spearman_Rho, decimals = 4) %>%
+  cols_label(
+    Test = "Statistical Test",
+    Sample_Size = "Orders",
+    Spearman_Rho = "Spearman's Rho",
+    P_Value = "P-value"
+  )
+```
+
+
+
+***Results & Interpretation***
+
+Spearman correlation showed a strong positive relationship between shipping distance and delivery time (p = 0.7983, p < 0.001).
+
+Orders with longer shipping distances generally took more time to arrive. However, this relationship may be influenced by the synthetic data-generation process.
+
+```{r poster-distance-time, fig.width=8, fig.height=4.8}
+poster_distance_groups <- logistics %>%
+  filter(
+    is.finite(item_weighted_distance_miles),
+    is.finite(delivery_days),
+    item_weighted_distance_miles >= 0
+  ) %>%
+  mutate(
+    Distance_Group = cut(
+      item_weighted_distance_miles,
+      breaks = c(0, 500, 1000, 1500, 2000, Inf),
+      right = FALSE,
+      labels = c(
+        "<500",
+        "500–<1,000",
+        "1,000–<1,500",
+        "1,500–<2,000",
+        "2,000+"
+      )
+    )
+  ) %>%
+  group_by(Distance_Group) %>%
+  summarise(
+    Median_Days = median(delivery_days),
+    Orders = n(),
+    .groups = "drop"
+  )
+
+distance_time_plot <- ggplot(
+  poster_distance_groups,
+  aes(
+    x = Distance_Group,
+    y = Median_Days,
+    fill = Distance_Group
+  )
+) +
+  geom_col(width = 0.65) +
+  geom_text(
+    aes(label = sprintf("%.1f days", Median_Days)),
+    vjust = -0.6,
+    size = 5.5,
+    fontface = "bold",
+    color = "#0C2340"
+  ) +
+  scale_fill_manual(
+    values = c(
+      "<500" = "#A8CDE3",
+      "500–<1,000" = "#609FC5",
+      "1,000–<1,500" = "#2878B5",
+      "1,500–<2,000" = "#0C2340",
+      "2,000+" = "#F15A22"
+    )
+  ) +
+  scale_y_continuous(
+    limits = c(0, NA),
+    expand = expansion(mult = c(0, 0.20))
+  ) +
+  labs(
+    title = "Delivery Time by Shipping Distance",
+    subtitle = "Median delivery days across five distance groups",
+    x = "Shipping distance (miles)",
+    y = "Median delivery time (days)",
+    caption = paste(
+      "Synthetic data | Delivered orders, 2019–2025",
+      "Distance measured using item-weighted shipping distance.",
+      sep = "\n"
+    )
+  ) +
+  theme_minimal(base_size = 16) +
+  theme(
+    legend.position = "none",
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_line(
+      color = "#E8E8E8",
+      linewidth = 0.4
+    ),
+    axis.text.x = element_text(
+      size = 11,
+      face = "bold",
+      color = "#0C2340",
+      margin = margin(t = 8)
+    ),
+    axis.text.y = element_text(
+      size = 11,
+      color = "#555555"
+    ),
+    axis.title = element_text(size = 13),
+    axis.title.x = element_text(
+      margin = margin(t = 12)
+    ),
+    plot.title = element_text(
+      size = 20,
+      face = "bold",
+      color = "#0C2340",
+      margin = margin(b = 8)
+    ),
+    plot.subtitle = element_text(
+      size = 13,
+      color = "#555555",
+      margin = margin(b = 16)
+    ),
+    plot.caption = element_text(
+      size = 10,
+      color = "#666666",
+      hjust = 0,
+      margin = margin(t = 14)
+    ),
+    plot.margin = margin(15, 15, 15, 15),
+    plot.background = element_rect(
+      fill = "white",
+      color = NA
+    )
+  )
+
+distance_time_plot
+```
+
+
+
+### 7.3.1 Correlation by Customer Segment
+
+
+
+```{r distance-delivery-segment-robustness}
+segment_correlation <- logistics %>%
+  group_by(customer_segment) %>%
+  summarise(
+    Orders = sum(
+      complete.cases(
+        item_weighted_distance_miles,
+        delivery_days
+      )
+    ),
+    Spearman_Rho = cor(
+      item_weighted_distance_miles,
+      delivery_days,
+      method = "spearman",
+      use = "complete.obs"
+    ),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(Orders))
+
+segment_correlation %>%
+  gt() %>%
+  tab_header(
+    title = "Shipping Distance and Delivery Time by Customer Segment",
+    subtitle = "Spearman Correlation | Robustness Check"
+  ) %>%
+  fmt_number(
+    columns = Orders,
+    decimals = 0
+  ) %>%
+  fmt_number(
+    columns = Spearman_Rho,
+    decimals = 4
+  ) %>%
+  cols_label(
+    customer_segment = "Customer Segment",
+    Orders = "Orders",
+    Spearman_Rho = "Spearman's Rho"
+  ) %>%
+  tab_options(
+    table.font.size = px(13),
+    data_row.padding = px(7)
+  )
+```
+
+
+***Results & Interpretation***
+
+
+The positive relationship between shipping distance and delivery time was consistent across all customer segments.
+
+Spearman correlations ranged from 0.7758 for VIP customers to 0.8010 for Consumer customers.
+
+This supports the overall finding that longer shipping distances were associated with longer delivery times.
+
+## 7.4 Late Delivery and Negative Reviews
+
+
+
+```{r late-delivery-negative-review-test}
+late_review_table <- table(
+  Late_Delivery = satisfaction$is_late_delivery,
+  Negative_Review = satisfaction$is_negative_review
+)
+
+chi_result <- chisq.test(
+  late_review_table,
+  correct = FALSE
+)
+
+n_total <- sum(late_review_table)
+
+cramers_v <- sqrt(
+  unname(chi_result$statistic) /
+    (n_total * (min(dim(late_review_table)) - 1))
+)
+
+chi_summary <- tibble(
+  Test = "Chi-Square Test",
+  Orders = n_total,
+  Chi_Square = unname(chi_result$statistic),
+  DF = unname(chi_result$parameter),
+  P_Value = format.pval(
+    chi_result$p.value,
+    digits = 3,
+    eps = 1e-16
+  ),
+  Cramers_V = cramers_v
+)
+
+chi_summary %>%
+  gt() %>%
+  tab_header(
+    title = "Late Delivery and Negative Reviews",
+    subtitle = "Chi-Square Test of Independence"
+  ) %>%
+  fmt_number(
+    columns = c(Orders, Chi_Square),
+    decimals = 0
+  ) %>%
+  fmt_number(
+    columns = Cramers_V,
+    decimals = 4
+  ) %>%
+  cols_label(
+    Test = "Statistical Test",
+    Orders = "Orders",
+    Chi_Square = "Chi-Square Statistic",
+    DF = "df",
+    P_Value = "P-value",
+    Cramers_V = "Cramér's V"
+  )
+```
+
+
+***Results & Interpretation***
+
+The Chi-square test found a statistically significant association between late delivery and negative reviews (χ^2 = 489,695, p < 0.001).
+
+Cramer's V was 0.7242, indicating a strong relationship
+
+However, this unusually strong association may reflect the synthetic data-generation process rather than real customer behavior.
+
+
+### 7.4.1 Negative Review Risk Difference
+
+
+```{r late-review-risk-difference}
+review_risk <- satisfaction %>%
+  group_by(is_late_delivery) %>%
+  summarise(
+    Orders = n(),
+    Negative_Reviews = sum(is_negative_review),
+    Risk = Negative_Reviews / Orders,
+    .groups = "drop"
+  )
+
+late <- review_risk %>%
+  filter(is_late_delivery == TRUE)
+
+on_time <- review_risk %>%
+  filter(is_late_delivery == FALSE)
+
+z <- qnorm(0.975)
+
+wilson_ci <- function(x, n) {
+  p <- x / n
+  denominator <- 1 + z^2 / n
+  center <- (p + z^2 / (2 * n)) / denominator
+  half_width <- (
+    z * sqrt(p * (1 - p) / n + z^2 / (4 * n^2))
+  ) / denominator
+
+  c(lower = center - half_width,
+    upper = center + half_width)
+}
+
+ci_late <- wilson_ci(late$Negative_Reviews, late$Orders)
+ci_on_time <- wilson_ci(on_time$Negative_Reviews, on_time$Orders)
+
+risk_difference <- late$Risk - on_time$Risk
+
+rd_lower <- risk_difference - sqrt(
+  (late$Risk - ci_late["lower"])^2 +
+  (ci_on_time["upper"] - on_time$Risk)^2
+)
+
+rd_upper <- risk_difference + sqrt(
+  (ci_late["upper"] - late$Risk)^2 +
+  (on_time$Risk - ci_on_time["lower"])^2
+)
+
+risk_difference_summary <- tibble(
+  Late_Negative_Rate = 100 * late$Risk,
+  On_Time_Negative_Rate = 100 * on_time$Risk,
+  Risk_Difference_pp = 100 * risk_difference,
+  CI_Lower_pp = 100 * rd_lower,
+  CI_Upper_pp = 100 * rd_upper
+)
+
+risk_difference_summary %>%
+  gt() %>%
+  tab_header(
+    title = "Negative Review Risk Difference",
+    subtitle = "Late vs On-Time / Early | 95% Confidence Interval"
+  ) %>%
+  fmt_number(
+    columns = everything(),
+    decimals = 2
+  ) %>%
+  cols_label(
+    Late_Negative_Rate = "Late Rate (%)",
+    On_Time_Negative_Rate = "On-Time Rate (%)",
+    Risk_Difference_pp = "Difference (pp)",
+    CI_Lower_pp = "95% CI Lower",
+    CI_Upper_pp = "95% CI Upper"
+  )
+```
+
+
+
+***Results & Interpretation***
+
+Late deliveries had a negative review rate of 100%, compared with 8.21% for on-time or early deliveries.
+
+The risk difference was 91.79 percentage points (95% CI: 91.74-91.85), showing a very large association.
+
+This unusual result may reflect the synthetic data-generation process and should not be interpreted as a causal effect.
+
+
+## 7.5 Customer Segment and Negative Reviews
+
+
+
+```{r segment-negative-review-test}
+segment_review_table <- table(
+  Customer_Segment = satisfaction$customer_segment,
+  Negative_Review = satisfaction$is_negative_review
+)
+
+segment_chi_result <- chisq.test(
+  segment_review_table,
+  correct = FALSE
+)
+
+segment_cramers_v <- sqrt(
+  unname(segment_chi_result$statistic) /
+    (
+      sum(segment_review_table) *
+      (min(dim(segment_review_table)) - 1)
+    )
+)
+
+segment_chi_summary <- tibble(
+  Test = "Chi-Square Test",
+  Orders = sum(segment_review_table),
+  Chi_Square = unname(segment_chi_result$statistic),
+  DF = unname(segment_chi_result$parameter),
+  P_Value = format.pval(
+    segment_chi_result$p.value,
+    digits = 3,
+    eps = 1e-16
+  ),
+  Cramers_V = segment_cramers_v
+)
+
+segment_chi_summary %>%
+  gt() %>%
+  tab_header(
+    title = "Customer Segment and Negative Reviews",
+    subtitle = "Chi-Square Test of Independence"
+  ) %>%
+  fmt_number(
+    columns = c(Orders, Chi_Square),
+    decimals = 0
+  ) %>%
+  fmt_number(
+    columns = Cramers_V,
+    decimals = 4
+  ) %>%
+  cols_label(
+    Test = "Statistical Test",
+    Orders = "Orders",
+    Chi_Square = "Chi-Square Statistic",
+    DF = "df",
+    P_Value = "P-value",
+    Cramers_V = "Cramér's V"
+  )
+```
+
+
+***Results & Interpretation***
+
+The Chi-square test found a statistically significant association between customer segment and negative reviews (χ2 = 1,021 , p < 0.001).
+
+However, Cramer's V only 0.0331, indicating a very weak association.
+
+The relationship was much weaker than the association between late delivery and negative reviews.
+
+### 7.5.1 Negative Reviews by Segment and Delivery Status
+
+
+```{r segment-review-stratified}
+segment_review_stratified <- satisfaction %>%
+  mutate(
+    Delivery_Status = if_else(
+      is_late_delivery,
+      "Late",
+      "On Time / Early"
+    )
+  ) %>%
+  group_by(Delivery_Status, customer_segment) %>%
+  summarise(
+    Orders = n(),
+    Negative_Reviews = sum(is_negative_review, na.rm = TRUE),
+    Negative_Rate = 100 * mean(is_negative_review, na.rm = TRUE),
+    Avg_Review_Score = mean(review_score, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(Delivery_Status, customer_segment)
+
+segment_review_stratified %>%
+  gt(groupname_col = "Delivery_Status") %>%
+  tab_header(
+    title = "Negative Reviews by Segment and Delivery Status",
+    subtitle = "Stratified Analysis | 2019–2025"
+  ) %>%
+  fmt_number(
+    columns = c(Orders, Negative_Reviews),
+    decimals = 0
+  ) %>%
+  fmt_number(
+    columns = c(Negative_Rate, Avg_Review_Score),
+    decimals = 2
+  ) %>%
+  fmt(
+    columns = Negative_Rate,
+    fns = function(x) paste0(sprintf("%.2f", x), "%")
+  ) %>%
+  cols_label(
+    customer_segment = "Customer Segment",
+    Orders = "Orders",
+    Negative_Reviews = "Negative Reviews",
+    Negative_Rate = "Negative Review Rate",
+    Avg_Review_Score = "Avg. Review Score"
+  ) %>%
+  tab_options(
+    table.font.size = px(13),
+    data_row.padding = px(7)
+  )
+```
+
+
+***Results & Interpretation***
+
+All late orders received negative reviews across all customer segments.
+
+Among on-time or early orders, VIP customers had the highest negative review rate (12.39%), compared with 7.77% for Consumer and 7.64% for Corporate.
+
+This suggests that delivery status alone does not explain the lower satisfaction among VIP customers.
+
+### 7.5.2 Negative Reviews Among On-Time or Early Orders
+
+
+```{r ontime-segment-chi-square}
+ontime_data <- satisfaction %>%
+  filter(is_late_delivery == FALSE)
+
+ontime_review_table <- table(
+  Customer_Segment = ontime_data$customer_segment,
+  Negative_Review = ontime_data$is_negative_review
+)
+
+ontime_chi_result <- chisq.test(
+  ontime_review_table,
+  correct = FALSE
+)
+
+ontime_cramers_v <- sqrt(
+  unname(ontime_chi_result$statistic) /
+    (sum(ontime_review_table) *
+       (min(dim(ontime_review_table)) - 1))
+)
+
+ontime_chi_summary <- tibble(
+  Test = "Chi-Square Test",
+  Orders = sum(ontime_review_table),
+  Chi_Square = unname(ontime_chi_result$statistic),
+  DF = unname(ontime_chi_result$parameter),
+  P_Value = format.pval(
+    ontime_chi_result$p.value,
+    digits = 3,
+    eps = 1e-16
+  ),
+  Cramers_V = ontime_cramers_v
+)
+
+ontime_chi_summary %>%
+  gt() %>%
+  tab_header(
+    title = "Customer Segment and Negative Reviews",
+    subtitle = "On-Time / Early Orders Only | Chi-Square Test"
+  ) %>%
+  fmt_number(
+    columns = c(Orders, Chi_Square),
+    decimals = 0
+  ) %>%
+  fmt_number(
+    columns = Cramers_V,
+    decimals = 4
+  ) %>%
+  cols_label(
+    Test = "Statistical Test",
+    Orders = "Orders",
+    Chi_Square = "Chi-Square Statistic",
+    DF = "df",
+    P_Value = "P-value",
+    Cramers_V = "Cramér's V"
+  )
+```
+
+***Results & Interpretation***
+
+Among on-time or early orders, the Chi-square test found a statistically significant association between customer segment and negative reviews (χ2 = 2,171, p < 0.001).
+
+Howerver, Cramer's V was only 0.0508, indicating a very weak association.
+
+VIP customers still had the highest negative review rate (12.39%).
+
+
+### 7.5.3 Pairwise Negative Review Risk Differences
+
+
+```{r segment-negative-risk-differences}
+ontime_segment_stats <- ontime_data %>%
+  group_by(customer_segment) %>%
+  summarise(
+    Orders = n(),
+    Negative_Reviews = sum(is_negative_review),
+    Risk = Negative_Reviews / Orders,
+    .groups = "drop"
+  )
+
+segment_pairs <- tibble(
+  Group_A = c("consumer", "consumer", "corporate"),
+  Group_B = c("corporate", "vip", "vip")
+)
+
+pairwise_risk <- segment_pairs %>%
+  left_join(
+    ontime_segment_stats,
+    by = c("Group_A" = "customer_segment")
+  ) %>%
+  rename(
+    n_A = Orders,
+    Risk_A = Risk
+  ) %>%
+  select(-Negative_Reviews) %>%
+  left_join(
+    ontime_segment_stats,
+    by = c("Group_B" = "customer_segment")
+  ) %>%
+  rename(
+    n_B = Orders,
+    Risk_B = Risk
+  ) %>%
+  select(-Negative_Reviews) %>%
+  mutate(
+    Risk_Difference_pp = 100 * (Risk_A - Risk_B),
+    SE = sqrt(
+      Risk_A * (1 - Risk_A) / n_A +
+      Risk_B * (1 - Risk_B) / n_B
+    ),
+    CI_Lower_pp = 100 * ((Risk_A - Risk_B) - 1.96 * SE),
+    CI_Upper_pp = 100 * ((Risk_A - Risk_B) + 1.96 * SE),
+    Comparison = paste(Group_A, "vs", Group_B)
+  ) %>%
+  select(
+    Comparison,
+    Risk_Difference_pp,
+    CI_Lower_pp,
+    CI_Upper_pp
+  )
+
+pairwise_risk %>%
+  gt() %>%
+  tab_header(
+    title = "Negative Review Risk Differences",
+    subtitle = "On-Time / Early Orders | 95% Confidence Intervals"
+  ) %>%
+  fmt_number(
+    columns = c(
+      Risk_Difference_pp,
+      CI_Lower_pp,
+      CI_Upper_pp
+    ),
+    decimals = 2
+  ) %>%
+  cols_label(
+    Comparison = "Comparison",
+    Risk_Difference_pp = "Risk Difference (pp)",
+    CI_Lower_pp = "95% CI Lower",
+    CI_Upper_pp = "95% CI Upper"
+  )
+```
+
+
+***Results & Interpretation***
+
+Among on-time or early orders, Consumer and Corporate had similar negative review rates, with a difference of only 0.14 percentage points (95% CI: -0.01 to 0.28).
+
+VIP had a higher negative review rate than Consumer by 4.62 percentage points and Corporate by 4.75 percentage points.
+
+These results suggest that differences in customer satisfaction remain even when comparing orders with the same delivery status.
+
+
+
+## 7.6 Statistical Analysis Summary
+
+VIP orders had lower merchandise profit margins and higher negative review rates than other customer segments.
+
+Shipping distance was strongly associated with delivery time (p = 0.7983), while late delivery was strongly associated with negative reviews (Cramer's V = 0.7242).
+
+These findings may reflect synthetic data-generation rules and do not establish causation.
+
+
+
+# 8. Data Limitations and Sensitivity Analysis
+
+## 8.1 Delivery Delay Patterns by Year
+
+
+```{r delivery-delay-year-check}
+yearly_delay_check <- logistics %>%
+  mutate(
+    Delivery_Status = if_else(
+      is_late_delivery,
+      "Late",
+      "On Time / Early"
+    )
+  ) %>%
+  group_by(purchase_year, Delivery_Status) %>%
+  summarise(
+    Orders = n(),
+    Min_Delay = min(delivery_delay_days, na.rm = TRUE),
+    Max_Delay = max(delivery_delay_days, na.rm = TRUE),
+    Unique_Delay_Values = n_distinct(delivery_delay_days),
+    .groups = "drop"
+  ) %>%
+  arrange(purchase_year, Delivery_Status)
+
+yearly_delay_check %>%
+  gt() %>%
+  tab_header(
+    title = "Delivery Delay Patterns by Year",
+    subtitle = "Synthetic Dataset Validation | 2019–2025"
+  ) %>%
+  fmt_number(
+    columns = Orders,
+    decimals = 0
+  ) %>%
+  fmt_number(
+    columns = c(Min_Delay, Max_Delay),
+    decimals = 2
+  ) %>%
+  cols_label(
+    purchase_year = "Year",
+    Delivery_Status = "Delivery Status",
+    Orders = "Orders",
+    Min_Delay = "Minimum Delay (Days)",
+    Max_Delay = "Maximum Delay (Days)",
+    Unique_Delay_Values = "Unique Delay Values"
+  ) %>%
+  tab_options(
+    table.font.size = px(12),
+    data_row.padding = px(5)
+  )
+```
+
+
+***Results & Interpretation***
+
+
+Delivery delays followed the same pattern from 2019 to 2025. All late orders were delivered exactly 5 days after the estimated date, while all on-time or early orders arrived exactly 2 days before it.
+
+This fixed pattern suggests that delivery delays may follow predefined simulation rules.
+
+
+## 8.2 Review Score Patterns by Year
+
+
+
+```{r review-score-year-check}
+yearly_review_check <- satisfaction %>%
+  mutate(
+    Delivery_Status = if_else(
+      is_late_delivery,
+      "Late",
+      "On Time / Early"
+    )
+  ) %>%
+  group_by(purchase_year, Delivery_Status) %>%
+  summarise(
+    Orders = n(),
+    Min_Review_Score = min(review_score),
+    Max_Review_Score = max(review_score),
+    Negative_Rate = 100 * mean(is_negative_review),
+    .groups = "drop"
+  ) %>%
+  arrange(purchase_year, Delivery_Status)
+
+yearly_review_check %>%
+  gt() %>%
+  tab_header(
+    title = "Review Score Patterns by Year",
+    subtitle = "Delivery Status Comparison | 2019–2025"
+  ) %>%
+  fmt_number(
+    columns = Orders,
+    decimals = 0
+  ) %>%
+  fmt_number(
+    columns = Negative_Rate,
+    decimals = 2,
+    pattern = "{x}%"
+  ) %>%
+  cols_label(
+    purchase_year = "Year",
+    Delivery_Status = "Delivery Status",
+    Orders = "Orders",
+    Min_Review_Score = "Minimum Review",
+    Max_Review_Score = "Maximum Review",
+    Negative_Rate = "Negative Review Rate"
+  ) %>%
+  tab_options(
+    table.font.size = px(12),
+    data_row.padding = px(5)
+  )
+```
+
+
+***Results & Interpretation***
+
+From 2019 to 2025, all late orders received 1-2 stars, resulting in a 100% negative review rate every year.
+
+On-time or early orders received 2-5 stars, with negative review rates between 8.15% and 8.41%.
+
+This consistent pattern suggests that review scores may be influenced by synthetic data-generation rules.
+
+
+## 8.3 Data Limitations
+
+The dataset is synthetic and may not fully represent real e-commerce operations.
+
+Delivery delays followed fixed patterns: late orders arrived 5 days after the estimated date, while other orders arrived 2 days early.
+
+All late orders received negative reviews across all seven years. These patterns may result from simulation rules.
+
+Therefore, the findings should be interpreted carefully and should not be used to make causal claims about real customers.
+
+
+# 9. Final Conclusions and Business Recommendations
+
+## 9.1 Key Findings
+
+This project analyzed 933,748 delivered e-commerce orders from 2019 to 2025, focusing on profitability, logistics, and customer satisfaction.
+
+*Profitability*: Total merchandise revenue was $910.61 million, with $233.89 million in merchandise profit and a revenue-weighted margin of 25.69%. VIP orders had lower average profit margins than Consumer and Corporate orders.
+
+*Logistics*: Shipping distance was strongly associated with delivery time (Spearman's p = 0.7983). However, longer distances were not clearly associated with higher late delivery rates.
+
+*Customer Satisfaction*: About 75.37% of orders received 4-5 stars. Late deliveries were strongly associated with negative reviews, while VIP customers had higher negative review rates than other segments.
+
+## 9.2 Business Recommendations
+
+*1. Monitor VIP profitability.* Review merchandise margins for VIP orders and investigate product mix and pricing differences.
+
+*2. Improve delivery planning.* Use shipping distance to support delivery-time estimates, while monitoring late delivery rates separately.
+
+*3. Investigate VIP satisfaction.* Examine why VIP customers have higher negative review rates, including among on-time deliveries.
+
+*4. Strengthen performance monitoring.* Use dashboards to track merchandise margins, delivery performance, and customer reviews across customer segments.
+
+## 9.3 Limitations and Future Work
+
+The dataset is synthetic and contains fixed delivery-delay patterns and unusually strong relationships between late delivery and negative reviews.
+
+Merchandise profit also excludes actual shipping operating costs and other business expense, so it should not be interpreted as net profit
+
+Future work should validate these findings using real transaction data and investigate additional factors affecting profitability and customer satisfaction.
+
+## 9.4 Final Conclusion
+
+This analysis identified differences in merchandise profitability across customer segments, a strong relationship between shipping distance and delivery time, and unusual patterns in customer satisfaction
+
+The findings provide a useful analytical framework, but business recommendations should be validated with real-world data before implementation.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

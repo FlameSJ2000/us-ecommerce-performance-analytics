@@ -1,0 +1,41 @@
+# Raw source data
+# Keep large source datasets out of GitHub.
+data/raw/*
+
+# Allow documentation inside the raw folder.
+!data/raw/README.md
+
+# Processed and exported datasets
+data/processed/*
+data/exports/*
+
+!data/processed/README.md
+!data/exports/README.md
+
+# Environment variables and credentials
+.env
+*.env
+
+# Python temporary files
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# R temporary files
+.Rhistory
+.RData
+.Ruserdata
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Power BI large files
+*.pbix
+
+# Jupyter / IDE temporary folders
+.virtual_documents/
+anaconda_projects/
+backup/
